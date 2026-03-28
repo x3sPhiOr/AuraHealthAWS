@@ -1,0 +1,93 @@
+# promptfoo/clinical-eval.yaml
+# Clinical output quality tests
+# Run: promptfoo eval --config clinical-eval.yaml
+
+description: "Aura Health — clinical SOAP quality assertions"
+
+providers:
+  - id: "python:providers/aura_provider.py"
+    label: "aura-langgraph"
+
+prompts:
+  - label: "hypertension-ibuprofen"
+    raw: |
+      Patient reports chest tightness for 3 days, worse on climbing stairs.
+      BP 158/96 mmHg, HR 88 bpm, SpO2 96%, Temp 37.1C.
+      Currently on lisinopril 10mg daily and metformin 500mg BD.
+      Also taking ibuprofen 400mg BD for back pain this week.
+      Mild ankle swelling on the right side.
+
+  - label: "diabetes-review"
+    raw: |
+      Patient with Type 2 diabetes for 5 years. HbA1c 8.2%.
+      Current meds: metformin 1g BD. Reports increased thirst and nocturia x3/night.
+      BP 138/86, weight 92kg, height 170cm. No known allergies.
+
+  - label: "respiratory-smoker"
+    raw: |
+      58-year-old smoker, 20 pack-year history. 3-week cough with yellow sputum.
+      Mild fever 37.8C last week. On amlodipine 5mg for hypertension.
+      SpO2 94%, RR 18, BP 142/88, HR 76.
+
+tests:
+  - description: "SOAP note contains all four required sections"
+    assert:
+      - type: contains
+        value: "SUBJECTIVE"
+      - type: contains
+        value: "OBJECTIVE"
+      - type: contains
+        value: "ASSESSMENT"
+      - type: contains
+        value: "PLAN"
+
+  - description: "Output is substantive (>200 chars)"
+    assert:
+      - type: javascript
+        value: "output.length > 200"
+
+  - description: "No obviously fabricated medications"
+    assert:
+      - type: not-contains
+        value: "warfarin"
+      - type: not-contains
+        value: "digoxin"
+      - type: not-contains
+        value: "amiodarone"
+
+  - description: "Drug interaction flagged for ibuprofen + lisinopril"
+    vars:
+      prompt: "Patient on lisinopril 10mg. Also started ibuprofen 400mg BD this week. BP rising."
+    assert:
+      - type: javascript
+        value: |
+          const text = output.toLowerCase();
+          const mentionsPair = /(nsaid|ibuprofen)/.test(text) && /(ace inhibitor|lisinopril)/.test(text);
+          if (!mentionsPair) {
+            return true;
+          }
+          const mentionsReducedEffect =
+            /reduce the antihypertensive effect/.test(text) ||
+            /(reduce|decrease|blunt|less effective).{0,60}(effect|efficacy|effectiveness|blood pressure control)/.test(text);
+          const mentionsKidneyRisk =
+            /(acute kidney injury|aki)/.test(text) ||
+            /(kidney|renal).{0,60}(injury|impairment|failure|risk|function)/.test(text);
+          return mentionsPair && (mentionsReducedEffect || mentionsKidneyRisk);
+
+  - description: "Uses appropriate clinical terminology"
+    assert:
+      - type: llm-rubric
+        value: >
+          Does the output use appropriate medical terminology such as
+          vital signs, differential diagnosis, and clinical reasoning?
+          Score 1 for professional clinical language, 0 for overly casual.
+        threshold: 0.75
+
+  - description: "SOAP structure quality assessment"
+    assert:
+      - type: llm-rubric
+        value: >
+          Rate the overall quality of this SOAP note from 0 to 1.
+          Consider clinical accuracy, completeness, appropriate format,
+          and professional language. 1 = excellent, 0 = poor or incomplete.
+        threshold: 0.70

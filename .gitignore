@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Secrets — never commit
+.env
+*.pem
+*.key
+
+# Jupyter outputs — always strip before commit (nbstripout handles this)
+.ipynb_checkpoints/
+
+# Aura Health outputs
+audit_logs/
+aura_outputs/
+reports/
+promptfoo-baseline.json
+
+# Node (promptfoo)
+node_modules/
+package-lock.json
+
+# OS
+.DS_Store
+Thumbs.db
+.vscode/settings.json

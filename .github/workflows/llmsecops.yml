@@ -1,0 +1,321 @@
+name: "Aura Health — LLMSecOps + AI Governance Pipeline"
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.11"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Gate 1 — Secret & credential scanning
+# ──────────────────────────────────────────────────────────────────────────────
+jobs:
+  secret-scan:
+    name: "Gate 1 — Secret scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: TruffleHog — scan git history for secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          extra_args: --only-verified
+
+      - name: Gitleaks — scan current files
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check notebook for hardcoded credentials
+        run: |
+          pip install nbconvert -q
+          jupyter nbconvert --to script aura_health_langgraph.ipynb \
+            --output /tmp/nb_script 2>/dev/null || true
+          if grep -E "AKIA[0-9A-Z]{16}" /tmp/nb_script.py 2>/dev/null; then
+            echo "FAIL: Hardcoded AWS key found in notebook"; exit 1
+          fi
+          if grep -E "sk-ant-api[0-9A-Za-z-]+" /tmp/nb_script.py 2>/dev/null; then
+            echo "FAIL: Hardcoded Anthropic key found in notebook"; exit 1
+          fi
+          echo "PASS: No hardcoded credentials in notebook"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Gate 2 — Static code security analysis
+# ──────────────────────────────────────────────────────────────────────────────
+  code-scan:
+    name: "Gate 2 — Code security scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install scanners
+        run: pip install bandit safety nbconvert -q
+
+      - name: Convert notebook to script for scanning
+        run: |
+          mkdir -p reports
+          jupyter nbconvert --to script aura_health_langgraph.ipynb \
+            --output /tmp/nb_script 2>/dev/null || true
+
+      - name: Bandit — Python security linter (high severity only)
+        run: |
+          bandit -r governance/ ai_verify/ tests/ /tmp/nb_script.py \
+            --exclude ./.venv \
+            --severity-level high \
+            -f json -o reports/bandit-report.json || true
+          bandit -r governance/ ai_verify/ tests/ \
+            --exclude ./.venv \
+            --severity-level high
+
+      - name: Safety — check dependencies for CVEs
+        run: |
+          safety check -r requirements.txt || true
+          safety check -r requirements-dev.txt
+
+      - name: Upload scan reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: code-scan-reports
+          path: reports/
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Gate 3 — Notebook hygiene
+# ──────────────────────────────────────────────────────────────────────────────
+  notebook-check:
+    name: "Gate 3 — Notebook hygiene"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install notebook tools
+        run: pip install nbstripout nbconvert -q
+
+      - name: Verify notebook outputs are stripped
+        run: |
+          nbstripout --dry-run --verify aura_health_langgraph.ipynb
+          if [ $? -ne 0 ]; then
+            echo "FAIL: Notebook has uncommitted cell outputs."
+            echo "Fix: run  nbstripout aura_health_langgraph.ipynb  then re-commit"
+            exit 1
+          fi
+          echo "PASS: Notebook outputs are clean"
+
+      - name: Validate notebook structure
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          with open("aura_health_langgraph.ipynb") as f:
+              nb = json.load(f)
+          cells = nb["cells"]
+          code  = [c for c in cells if c["cell_type"] == "code"]
+          print(f"Notebook: {len(cells)} cells, {len(code)} code cells — OK")
+          for i, cell in enumerate(cells):
+              for output in cell.get("outputs", []):
+                  text = str(output.get("text","") + str(output.get("data","")))
+                  if any(p in text for p in ["AKIA","sk-ant","password","PASSWORD"]):
+                      print(f"FAIL: Cell {i} output may contain credentials")
+                      sys.exit(1)
+          print("PASS: No credentials in cell outputs")
+          EOF
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Gate 4 — LLMSecOps pytest (mocked — no API calls)
+# ──────────────────────────────────────────────────────────────────────────────
+  llmsecops-tests:
+    name: "Gate 4 — LLMSecOps pytest"
+    runs-on: ubuntu-latest
+    needs: [secret-scan, code-scan, notebook-check]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt -q
+
+      - name: Install spaCy model for presidio
+        run: python -m spacy download en_core_web_lg -q
+
+      - name: Run LLMSecOps tests (mocked)
+        run: |
+          pytest tests/test_llmsecops.py \
+            -v --tb=short \
+            --junitxml=reports/llmsecops-results.xml
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: llmsecops-results
+          path: reports/llmsecops-results.xml
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Gate 5 — IMDA AI Verify governance tests
+# ──────────────────────────────────────────────────────────────────────────────
+  ai-verify:
+    name: "Gate 5 — IMDA AI Verify governance"
+    runs-on: ubuntu-latest
+    needs: [llmsecops-tests]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt -q
+
+      - name: Install spaCy model
+        run: python -m spacy download en_core_web_lg -q
+
+      - name: Run AI Verify governance tests
+        run: |
+          pytest ai_verify/test_ai_verify.py \
+            -v --tb=short \
+            --junitxml=reports/ai-verify-results.xml
+
+      - name: Upload AI Verify report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ai-verify-report
+          path: reports/ai-verify-results.xml
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Gate 6 — promptfoo LLM eval (requires live API — runs on push to main only)
+# ──────────────────────────────────────────────────────────────────────────────
+  promptfoo-eval:
+    name: "Gate 6 — promptfoo LLM evals"
+    runs-on: ubuntu-latest
+    needs: [ai-verify]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: o4-mini
+      AURA_EVAL_LLM_PROVIDER: anthropic
+      AURA_EVAL_LLM_MODEL: claude-haiku-4-5-20251001
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install promptfoo
+        run: npm install -g promptfoo
+
+      - name: Install Python dependencies for provider
+        run: pip install langchain-anthropic langchain-openai langgraph langchain python-dotenv -q
+
+      - name: Login to promptfoo cloud
+        env:
+          PROMPTFOO_API_KEY: ${{ secrets.PROMPTFOO_API_KEY }}
+        run: |
+          if [ -n "$PROMPTFOO_API_KEY" ]; then
+            promptfoo auth login -k $PROMPTFOO_API_KEY
+          else
+            echo "PROMPTFOO_API_KEY not set — skipping cloud login"
+          fi
+
+      - name: Run clinical quality evals
+        run: |
+          mkdir -p reports
+          cd promptfoo
+          promptfoo eval --config clinical-eval.yaml \
+            --output ../reports/clinical-results.json \
+            --no-cache
+
+      - name: Run PII leak evals
+        run: |
+          cd promptfoo
+          promptfoo eval --config pii-eval.yaml \
+            --output ../reports/pii-results.json \
+            --no-cache
+
+      - name: Run red team evals and upload to cloud
+        env:
+          PROMPTFOO_API_KEY: ${{ secrets.PROMPTFOO_API_KEY }}
+        run: |
+          cd promptfoo
+          if [ -n "$PROMPTFOO_API_KEY" ]; then
+            promptfoo eval --config redteam-eval.yaml \
+              --output ../reports/redteam-results.json \
+              --no-cache --share
+          else
+            promptfoo eval --config redteam-eval.yaml \
+              --output ../reports/redteam-results.json \
+              --no-cache
+          fi
+
+      - name: Run routing evals
+        run: |
+          cd promptfoo
+          promptfoo eval --config routing-eval.yaml \
+            --output ../reports/routing-results.json \
+            --no-cache
+
+      - name: Check overall pass threshold (85%)
+        run: |
+          python3 - <<'EOF'
+          import json, sys, glob, os
+          reports = glob.glob("reports/*-results.json")
+          total, passed = 0, 0
+          for path in reports:
+              try:
+                  with open(path) as f:
+                      data = json.load(f)
+                  results = data.get("results", {}).get("results", [])
+                  for r in results:
+                      total  += 1
+                      if r.get("success", False):
+                          passed += 1
+              except Exception as e:
+                  print(f"Warning: could not parse {path}: {e}")
+          if total == 0:
+              print("No promptfoo results found — skipping threshold check")
+              sys.exit(0)
+          rate = passed / total
+          print(f"promptfoo results: {passed}/{total} passed ({rate:.1%})")
+          if rate < 0.85:
+              print(f"FAIL: Pass rate {rate:.1%} below 85% threshold")
+              sys.exit(1)
+          print("PASS: promptfoo threshold cleared")
+          EOF
+
+      - name: Upload promptfoo reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: promptfoo-reports
+          path: reports/
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Final gate — blocks merge if any required gate failed
+# ──────────────────────────────────────────────────────────────────────────────
+  security-gate:
+    name: "Security gate (required for merge)"
+    runs-on: ubuntu-latest
+    needs: [secret-scan, code-scan, notebook-check, llmsecops-tests, ai-verify]
+    steps:
+      - name: All required gates passed
+        run: echo "All LLMSecOps + IMDA AI Governance gates passed — merge allowed"

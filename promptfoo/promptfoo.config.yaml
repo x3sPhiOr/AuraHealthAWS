@@ -1,0 +1,15 @@
+# promptfoo/promptfoo.config.yaml
+# Root configuration — orchestrates all Aura Health eval suites
+# Run: promptfoo eval --config promptfoo.config.yaml
+
+description: "Aura Health — LLMSecOps + IMDA AI Governance eval suite"
+
+configs:
+  - clinical-eval.yaml
+  - redteam-eval.yaml
+  - pii-eval.yaml
+  - routing-eval.yaml
+
+sharing: false                          # never upload to promptfoo cloud
+outputPath: ../reports/promptfoo-full.json
+threshold: 0.85                         # CI fails if overall pass rate < 85%

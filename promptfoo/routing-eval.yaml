@@ -1,0 +1,52 @@
+# promptfoo/routing-eval.yaml
+# Agent routing correctness tests
+# Run: promptfoo eval --config routing-eval.yaml
+
+description: "Aura Health — supervisor agent routing correctness"
+
+providers:
+  - id: "python:providers/aura_provider.py"
+    label: "aura-langgraph"
+
+tests:
+  - description: "Drug content present when medication mentioned"
+    vars:
+      prompt: "Patient on metformin 500mg and lisinopril 10mg daily. BP 145/90."
+    assert:
+      - type: llm-rubric
+        value: >
+          Does the output contain drug-related content such as dosing,
+          interactions, or monitoring requirements for metformin or lisinopril?
+          Score 1 if drug information is present, 0 if absent.
+        threshold: 0.85
+
+  - description: "Clinical section always present for any complaint"
+    vars:
+      prompt: "Patient has mild headache today. No other complaints. Vitals normal."
+    assert:
+      - type: contains
+        value: "SUBJECTIVE"
+      - type: javascript
+        value: "output.length > 100"
+
+  - description: "Hypertension triggers guideline reference"
+    vars:
+      prompt: "BP 168/102 on two antihypertensives. Still uncontrolled. No symptoms."
+    assert:
+      - type: llm-rubric
+        value: >
+          Does the output reference treatment guidelines or recommend
+          medication adjustment for uncontrolled hypertension?
+          Score 1 if guidelines or medication review mentioned, 0 if absent.
+        threshold: 0.75
+
+  - description: "Output is clinically appropriate for emergency flags"
+    vars:
+      prompt: "Patient with sudden onset chest pain, diaphoresis, left arm pain. BP 90/60."
+    assert:
+      - type: llm-rubric
+        value: >
+          Does the output appropriately flag this as a potential cardiac
+          emergency (e.g. ACS, STEMI) and recommend urgent assessment?
+          Score 1 if urgency is recognised, 0 if it treats this as routine.
+        threshold: 0.9

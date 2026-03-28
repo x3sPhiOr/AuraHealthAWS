@@ -1,0 +1,39 @@
+{
+  "_comment": "Template — run deploy/push-ecr.sh to generate the real apprunner-service.json with your account ID and role ARNs filled in.",
+  "ServiceName": "aura-health",
+  "SourceConfiguration": {
+    "ImageRepository": {
+      "ImageIdentifier": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/aura-health:latest",
+      "ImageRepositoryType": "ECR",
+      "ImageConfiguration": {
+        "Port": "8000",
+        "RuntimeEnvironmentVariables": {
+          "AWS_DEFAULT_REGION":  "<REGION>",
+          "BEDROCK_MODEL":       "anthropic.claude-haiku-4-5-20251001-v1:0",
+          "BEDROCK_PROVIDER":    "anthropic",
+          "KB_USE_SEED":         "true",
+          "KB_ENABLE_CDC":       "false",
+          "KB_ENABLE_PUBMED":    "false",
+          "KB_ENABLE_OPENFDA":   "false"
+        }
+      }
+    },
+    "AutoDeploymentsEnabled": true,
+    "AuthenticationConfiguration": {
+      "AccessRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/aura-health-ecr-access-role"
+    }
+  },
+  "InstanceConfiguration": {
+    "Cpu": "2 vCPU",
+    "Memory": "4 GB",
+    "InstanceRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/aura-health-instance-role"
+  },
+  "HealthCheckConfiguration": {
+    "Protocol": "HTTP",
+    "Path": "/health",
+    "Interval": 10,
+    "Timeout": 5,
+    "HealthyThreshold": 1,
+    "UnhealthyThreshold": 5
+  }
+}

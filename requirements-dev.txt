@@ -1,0 +1,21 @@
+# Aura Health — development + CI dependencies
+# Install: pip install -r requirements-dev.txt
+
+-r requirements.txt
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-mock>=3.12.0
+
+# Security scanning
+bandit>=1.7.8
+safety>=3.0.0
+nbstripout>=0.7.1
+nbconvert>=7.0.0
+
+# promptfoo Python provider deps (lighter than full runtime)
+langchain-anthropic>=0.3.0
+langchain-openai>=0.3.0
+langgraph>=0.2.0
+langchain>=0.3.0

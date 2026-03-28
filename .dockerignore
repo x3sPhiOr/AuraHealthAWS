@@ -1,0 +1,43 @@
+# ── Secrets — NEVER include these in the image ────────────────────────────────
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# ── Python cache ──────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# ── Development / notebook artefacts ─────────────────────────────────────────
+*.ipynb
+.ipynb_checkpoints/
+requirements-dev.txt
+
+# ── Test / CI tooling ─────────────────────────────────────────────────────────
+tests/
+ai_verify/
+promptfoo/
+.github/
+.pre-commit-config.yaml
+.git/
+
+# ── Runtime output directories (ephemeral — mount EFS in production) ─────────
+aura_outputs/
+audit_logs/
+
+# ── Docs / local tooling ──────────────────────────────────────────────────────
+docs/
+*.md
+!README.md
+
+# ── OS / IDE noise ────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
