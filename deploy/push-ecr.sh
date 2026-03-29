@@ -15,9 +15,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-: "${AWS_ACCOUNT_ID:?Set AWS_ACCOUNT_ID}"
-: "${AWS_REGION:=ap-southeast-1}"
-: "${SERVICE_NAME:=aura-health}"
+: "${AWS_ACCOUNT_ID:?Set 812661756342}"
+: "${AWS_REGION:=us-east-1}"
+: "${SERVICE_NAME:=aurahealthaws}"
 
 REPO_NAME="${SERVICE_NAME}"
 IMAGE_TAG="latest"

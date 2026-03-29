@@ -766,7 +766,20 @@ function _startRecorderCycle() {
 
     if (!isFinal) {
       await sendAudioChunk(blob, idx, false);
-      _startRecorderCycle();          // immediately begin next 10-second window
+      if (stopRequested) {
+        // stopRecording() was called while this chunk was uploading; the
+        // recorder was already inactive so mediaRecorder.stop() was a no-op.
+        // Manually trigger the final path with an empty blob (all audio is
+        // already uploaded) so the backend receives is_final=true.
+        await sendFinalAudioChunk(new Blob([], { type: audioMimeType || 'audio/webm' }), chunkIndex++);
+        clearInterval(timerInterval);
+        audioStream.getTracks().forEach(t => t.stop());
+        document.getElementById('recDot').classList.remove('recording');
+        document.getElementById('startRecBtn').disabled = false;
+        document.getElementById('stopRecBtn').disabled  = true;
+      } else {
+        _startRecorderCycle();          // immediately begin next 10-second window
+      }
     } else {
       await sendFinalAudioChunk(blob, idx);
       clearInterval(timerInterval);
@@ -825,6 +838,8 @@ function stopRecording() {
   // Set flag BEFORE calling stop() so onstop sees it as the final chunk even
   // if the 10-second timeout fires between now and when onstop executes.
   stopRequested = true;
+  clearInterval(timerInterval);
+  document.getElementById('recDot').classList.remove('recording');
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop();
   }

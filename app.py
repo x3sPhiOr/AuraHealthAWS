@@ -1312,7 +1312,7 @@ async def consult_audio(
     Final response      →  Content-Type: text/event-stream (SSE)
     """
     audio_bytes = await request.body()
-    if not audio_bytes:
+    if not audio_bytes and not is_final:
         raise HTTPException(status_code=400, detail="Empty body — expected raw audio/webm bytes.")
 
     sid = session_id or str(uuid.uuid4())
@@ -1323,19 +1323,21 @@ async def consult_audio(
         # EBML header).  Transcripts are accumulated across chunks.
         audio_sessions[sid] = {"transcripts": [], "accumulated": ""}
 
-    try:
-        chunk_transcript = await _transcribe_webm(audio_bytes, chunk_index)
-    except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=502, detail=f"STT failed: {e}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error during transcription: {e}")
+    if audio_bytes:
+        try:
+            chunk_transcript = await _transcribe_webm(audio_bytes, chunk_index)
+        except ValueError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+        except RuntimeError as e:
+            raise HTTPException(status_code=502, detail=f"STT failed: {e}")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Unexpected error during transcription: {e}")
 
-    audio_sessions[sid]["transcripts"].append(chunk_transcript)
-    audio_sessions[sid]["accumulated"] = " ".join(
-        t for t in audio_sessions[sid]["transcripts"] if t
-    ).strip()
+        audio_sessions[sid]["transcripts"].append(chunk_transcript)
+        audio_sessions[sid]["accumulated"] = " ".join(
+            t for t in audio_sessions[sid]["transcripts"] if t
+        ).strip()
+
     accumulated = audio_sessions[sid]["accumulated"]
 
     # ── Non-final: return partial transcript for live captioning ──────────────
