@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aura Health</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #e8eaed;
+      --surface:   #f3f4f6;
+      --border:    #d1d5db;
+      --text:      #111827;
+      --muted:     #6b7280;
+      --accent:    #6366f1;
+      --accent-h:  #4f46e5;
+      --green:     #15803d;
+      --red:       #b91c1c;
+      --yellow:    #a16207;
+      --radius:    8px;
+      --font-mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Top bar ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    header h1 { font-size: 15px; font-weight: 600; color: var(--accent-h); flex-shrink: 0; flex: 1; }
+    header #healthBadge { margin-left: auto; }
+    header label { color: var(--muted); font-size: 12px; }
+    #baseUrl {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: var(--radius);
+      padding: 6px 10px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      width: 260px;
+    }
+    #healthBadge {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      background: var(--border);
+      color: var(--muted);
+      transition: all .3s;
+    }
+    #healthBadge.ok    { background: #dcfce7; color: var(--green); }
+    #healthBadge.error { background: #fee2e2; color: var(--red); }
+
+    /* ── Layout ── */
+    .main { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Left panel ── */
+    .panel-left {
+      width: 340px;
+      flex-shrink: 0;
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    /* ── Right panel ── */
+    .panel-right {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .tab-btn {
+      padding: 10px 20px;
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 13px;
+      border-bottom: 2px solid transparent;
+      transition: all .2s;
+    }
+    .tab-btn.active { color: var(--accent-h); border-bottom-color: var(--accent); }
+    .tab-btn:hover:not(.active) { color: var(--text); }
+
+    .tab-pane { display: none; flex: 1; overflow-y: auto; padding: 20px; }
+    .tab-pane.active { display: flex; flex-direction: column; gap: 14px; }
+
+    /* ── Section labels ── */
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 14px 16px 6px;
+    }
+
+    /* ── Patient context form ── */
+    .patient-form { padding: 0 16px 16px; display: flex; flex-direction: column; gap: 10px; }
+    .field-row { display: flex; flex-direction: column; gap: 4px; }
+    .field-row label { font-size: 11px; font-weight: 600; color: var(--muted); letter-spacing: .03em; text-transform: uppercase; }
+    .field-row input,
+    .field-row textarea,
+    .field-row select {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 11px;
+      font-size: 13px;
+      font-family: inherit;
+      resize: vertical;
+      box-shadow: 0 1px 3px rgba(0,0,0,.06), inset 0 1px 2px rgba(0,0,0,.04);
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .field-row input:focus,
+    .field-row textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(99,102,241,.15), 0 1px 3px rgba(0,0,0,.06);
+    }
+    .field-row input::placeholder,
+    .field-row textarea::placeholder { color: #b0b8c4; }
+    .field-hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    /* ── Buttons ── */
+    .btn {
+      border: none;
+      border-radius: var(--radius);
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-h); }
+    .btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    .btn-outline:hover { border-color: var(--accent); color: var(--accent-h); }
+    .btn-danger  { background: #fee2e2; color: var(--red); border: 1px solid #fca5a5; }
+    .btn-danger:hover { background: #fecaca; }
+    .btn-green   { background: #dcfce7; color: var(--green); border: 1px solid #86efac; }
+    .btn-green:hover { background: #bbf7d0; }
+
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+    /* ── Transcript textarea ── */
+    #transcript {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      color: var(--text);
+      border-radius: 10px;
+      padding: 14px;
+      font-size: 13.5px;
+      font-family: inherit;
+      line-height: 1.75;
+      resize: vertical;
+      min-height: 200px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.07), inset 0 1px 2px rgba(0,0,0,.04);
+      transition: border-color .2s, box-shadow .2s;
+    }
+    #transcript:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(99,102,241,.15), 0 1px 4px rgba(0,0,0,.07);
+    }
+    #transcript::placeholder { color: #b0b8c4; font-style: italic; }
+
+    /* ── Audio UI ── */
+    .record-status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); transition: all .3s; }
+    .dot.recording { background: var(--red); animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+    #recordTimer { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
+    #chunkCounter { font-size: 12px; color: var(--muted); }
+
+    #captionBox {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px;
+      min-height: 80px;
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .caption-label { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+
+    /* ── Event log ── */
+    .log-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .log-header span { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+    #eventLog {
+      height: 260px;
+      overflow-y: auto;
+      background: #1e293b;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.7;
+      padding: 10px 14px;
+    }
+    .log-line { white-space: pre-wrap; word-break: break-all; }
+    .log-line.node-stt         { color: #60a5fa; }
+    .log-line.node-stt_prep    { color: #818cf8; }
+    .log-line.node-intake      { color: #a78bfa; }
+    .log-line.node-supervisor  { color: #fb923c; }
+    .log-line.node-clinical    { color: #4ade80; }
+    .log-line.node-drug        { color: #22d3ee; }
+    .log-line.node-research    { color: #2dd4bf; }
+    .log-line.node-summary     { color: #facc15; font-weight: 600; }
+    .log-line.node-xai         { color: #c084fc; }
+    .log-line.node-fairness    { color: #f472b6; }
+    .log-line.node-human_oversight { color: #fb7185; }
+    .log-line.node-clinical_safety { color: #f97316; }
+    .log-line.node-audit       { color: #94a3b8; }
+    .log-line.node-done        { color: var(--green); font-weight: 600; }
+    .log-line.node-error       { color: var(--red); font-weight: 600; }
+    .log-line.node-info        { color: var(--muted); font-style: italic; }
+
+    /* ── CORS warning banner ── */
+    #corsWarning {
+      display: none;
+      background: #fefce8;
+      border-bottom: 1px solid #fde68a;
+      color: #92400e;
+      font-size: 13px;
+      padding: 10px 20px;
+      line-height: 1.6;
+    }
+    #corsWarning code {
+      background: #fef3c7;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+
+    /* ── SOAP note panel ── */
+    #soapPanel {
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      padding: 16px;
+      max-height: 320px;
+      overflow-y: auto;
+      display: none;
+    }
+    #soapPanel h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 10px; }
+    #soapContent {
+      font-size: 13px;
+      line-height: 1.8;
+      white-space: pre-wrap;
+      color: var(--text);
+    }
+    #soapContent .soap-section { color: var(--accent-h); font-weight: 600; }
+
+    /* ── Governance badges ── */
+    #govBadges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .gov-badge {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .gov-badge.pass   { border-color: #86efac; color: var(--green);  background: #dcfce7; }
+    .gov-badge.warn   { border-color: #fde68a; color: var(--yellow); background: #fefce8; }
+    .gov-badge.block  { border-color: #fca5a5; color: var(--red);    background: #fee2e2; }
+
+    /* ── Schema dump ── */
+    #schemaOut {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: #94a3b8;
+      white-space: pre;
+      overflow: auto;
+      max-height: 200px;
+      display: none;
+    }
+
+    /* ── Session ID badge ── */
+    #sessionBadge {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+      padding: 4px 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<!-- ══ CORS WARNING (file:// origin) ════════════════════════════════════════ -->
+<div id="corsWarning">
+  <strong>⚠ CORS warning:</strong> This page is being served from <code>file://</code>.
+  Browsers send <code>Origin: null</code> for local files, which most servers block.
+  Serve this file over HTTP instead:<br>
+  <code>python -m http.server 8080</code> &nbsp;→&nbsp; open
+  <code>http://localhost:8080/test_client.html</code>
+  &nbsp;|&nbsp; Or add <code>CORS_ORIGINS=null</code> to your <code>.env</code> for local testing only.
+</div>
+
+<!-- ══ TOP BAR ══════════════════════════════════════════════════════════════ -->
+<header>
+  <h1>🩺 Aura Health</h1>
+  <input id="baseUrl" type="text" value="https://waz6fna5ax.us-east-1.awsapprunner.com" style="display:none;" />
+  <span id="sessionBadge" style="display:none;">No active session</span>
+  <span id="healthBadge">● Checking…</span>
+</header>
+
+<!-- ══ MAIN ═════════════════════════════════════════════════════════════════ -->
+<div class="main">
+
+  <!-- ── Left panel: Patient Context ── -->
+  <div class="panel-left">
+    <div class="section-label">Patient Context</div>
+    <div style="padding: 12px 16px 4px; display: flex; gap: 8px; align-items: flex-end;">
+      <div class="field-row" style="flex:1;">
+        <label>Patient MRN</label>
+        <input id="pc-mrn" type="text" placeholder="e.g. MRN-001" onkeydown="if(event.key==='Enter')lookupMRN()" />
+      </div>
+      <button class="btn btn-outline" onclick="lookupMRN()" style="padding:6px 12px; font-size:12px; flex-shrink:0;">Search</button>
+    </div>
+    <div id="mrn-status" style="padding: 0 16px 8px; font-size: 11px; min-height: 16px;"></div>
+    <div class="patient-form">
+      <div class="field-row">
+        <label>Name</label>
+        <input id="pc-name" type="text" placeholder="e.g. Alex" />
+      </div>
+      <div class="field-row">
+        <label>Age</label>
+        <input id="pc-age" type="number" min="0" max="120" placeholder="e.g. 45" />
+      </div>
+      <div class="field-row">
+        <label>Gender</label>
+        <input id="pc-gender" type="text" placeholder="e.g. female" />
+      </div>
+      <div class="field-row">
+        <label>Known Conditions <span class="field-hint">(comma-separated)</span></label>
+        <textarea id="pc-conditions" rows="2" placeholder="e.g. hypertension, asthma"></textarea>
+      </div>
+      <div class="field-row">
+        <label>Current Medications <span class="field-hint">(comma-separated)</span></label>
+        <textarea id="pc-medications" rows="2" placeholder="e.g. lisinopril 10mg, metformin 500mg"></textarea>
+      </div>
+      <div class="field-row">
+        <label>Allergies</label>
+        <input id="pc-allergies" type="text" placeholder="e.g. NKDA" />
+      </div>
+    </div>
+
+    <div style="margin-top: auto; padding: 14px 16px; border-top: 1px solid var(--border); font-size: 10px; color: var(--muted); line-height: 1.6;">
+      <div>&copy; 2026 Aura Health. All rights reserved.</div>
+      <div>NUS-ISS-SWE5008-NCS-2026-01, Team 24</div>
+    </div>
+
+  </div>
+
+  <!-- ── Right panel ── -->
+  <div class="panel-right">
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('audio',this)">Audio Consultation</button>
+      <button class="tab-btn"        onclick="switchTab('text',this)">Text Consultation</button>
+    </div>
+
+    <!-- ── Text tab ── -->
+    <div id="tab-text" class="tab-pane">
+      <div class="field-row">
+        <label style="font-size:11px; font-weight:600; color:var(--muted); letter-spacing:.03em; text-transform:uppercase;">Consultation Transcript</label>
+        <textarea id="transcript" placeholder="Doctor: What brings you in today?&#10;Patient: I have had persistent chest tightness and shortness of breath on exertion for the past week. I also feel dizzy when I stand up quickly. My blood pressure was 162/98 at the pharmacy.">Doctor: What brings you in today?
+Patient: I have had persistent chest tightness and shortness of breath on exertion for the past week. My blood pressure was 162/98 at the pharmacy yesterday. I have been taking ibuprofen for back pain every day this week.</textarea>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" id="submitTextBtn" onclick="submitText()">
+          POST /consult → stream
+        </button>
+        <button class="btn btn-outline" onclick="clearLog()">Clear log</button>
+      </div>
+    </div>
+
+    <!-- ── Audio tab ── -->
+    <div id="tab-audio" class="tab-pane active">
+      <div class="record-status">
+        <div class="dot" id="recDot"></div>
+        <span id="recordTimer">00:00</span>
+        <span id="chunkCounter" style="margin-left:auto;"></span>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-green" id="startRecBtn" onclick="startRecording()">
+          ● Start Recording
+        </button>
+        <button class="btn btn-danger" id="stopRecBtn" onclick="stopRecording()" disabled>
+          ■ Stop &amp; Consult
+        </button>
+        <button class="btn btn-outline" onclick="clearLog()">Clear log</button>
+      </div>
+
+      <div>
+        <div class="caption-label">Live caption (accumulated transcript)</div>
+        <div id="captionBox"><span style="color:var(--muted)">Recording not started.</span></div>
+      </div>
+
+      <div style="font-size:12px;color:var(--muted);line-height:1.7;background:var(--surface);padding:10px 12px;border-radius:6px;border:1px solid var(--border);">
+        <strong style="color:var(--text);">How it works:</strong><br>
+        1. Click <em>Start Recording</em> — browser will request microphone access.<br>
+        2. Every <strong>10 seconds</strong>, a chunk is sent to <code>POST /consult/audio?is_final=false</code> and transcribed. The live caption updates.<br>
+        3. Click <em>Stop &amp; Consult</em> — the final chunk is sent with <code>is_final=true</code> and the SSE consultation stream begins automatically.
+      </div>
+    </div>
+
+    <!-- ── Event log ── -->
+    <div class="log-header">
+      <span>Pipeline Events</span>
+      <button class="btn btn-outline" onclick="clearLog()" style="padding:3px 10px;font-size:11px;">Clear</button>
+    </div>
+    <div id="eventLog"></div>
+
+    <!-- ── SOAP note + governance ── -->
+    <div id="soapPanel">
+      <h3>SOAP Note</h3>
+      <div id="soapContent"></div>
+      <div id="govBadges"></div>
+    </div>
+
+  </div><!-- /panel-right -->
+</div><!-- /main -->
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+// UTILITIES
+// ══════════════════════════════════════════════════════════════════════════════
+
+function base() {
+  return document.getElementById('baseUrl').value.replace(/\/+$/, '');
+}
+
+function genId() {
+  return 'aura-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+}
+
+function setSession(id) {
+  document.getElementById('sessionBadge').textContent = 'Session: ' + id;
+}
+
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+}
+
+// ── Patient context ────────────────────────────────────────────────────────
+// ── Patient MRN lookup dictionary ─────────────────────────────────────────
+const MRN_DIRECTORY = {
+  'S1234567D': {
+    name: 'Alex',
+    age: 58, gender: 'male',
+    known_conditions: 'hypertension, type_2_diabetes',
+    current_medications: 'lisinopril 10mg, metformin 500mg BD',
+    allergies: 'NKDA',
+  },
+  'S0000000J': {
+    name: 'Bernice',
+    age: 26, gender: 'female',
+    known_conditions: 'ezcema',
+    current_medications: 'Elidel, Eucrisa',
+    allergies: 'aspirin, amoxicillin',
+  },
+  'S1111111D': {
+    name: 'Cindy',
+    age: 45, gender: 'female',
+    known_conditions: 'asthma, hyperlipidaemia',
+    current_medications: 'salbutamol inhaler PRN, atorvastatin 20mg',
+    allergies: 'penicillin',
+  },
+  'S2222222H': {
+    name: 'Desmond',
+    age: 72, gender: 'male',
+    known_conditions: 'chronic kidney disease stage 3, atrial fibrillation',
+    current_medications: 'apixaban 5mg BD, amlodipine 5mg',
+    allergies: 'sulfonamides',
+  },
+  'S8888888Z': {
+    name: 'Eugene',
+    age: 30, gender: 'male',
+    known_conditions: 'HIV',
+    current_medications: 'Dolutegravir, Tenofovir',
+    allergies: 'ibuprofen',
+  },
+};
+
+function lookupMRN() {
+  const mrn    = document.getElementById('pc-mrn').value.trim().toUpperCase();
+  const status = document.getElementById('mrn-status');
+  const record = MRN_DIRECTORY[mrn] || MRN_DIRECTORY[mrn.replace(/^MRN-?/i, 'MRN-')];
+
+  if (!record) {
+    status.style.color = 'var(--red)';
+    status.textContent = 'No record found for "' + mrn + '"';
+    return;
+  }
+
+  document.getElementById('pc-name').value         = record.name || '';
+  document.getElementById('pc-age').value          = record.age;
+  document.getElementById('pc-gender').value       = record.gender;
+  document.getElementById('pc-conditions').value   = record.known_conditions;
+  document.getElementById('pc-medications').value  = record.current_medications;
+  document.getElementById('pc-allergies').value    = record.allergies;
+
+  status.style.color = 'var(--green)';
+  status.textContent = 'Loaded: ' + (record.name || mrn);
+}
+
+function readPatientContext() {
+  const split = s => s.split(',').map(x => x.trim()).filter(Boolean);
+  return {
+    age:                 parseInt(document.getElementById('pc-age').value) || null,
+    gender:              document.getElementById('pc-gender').value.trim() || null,
+    known_conditions:    split(document.getElementById('pc-conditions').value),
+    current_medications: split(document.getElementById('pc-medications').value),
+    allergies:           document.getElementById('pc-allergies').value.trim() || null,
+  };
+}
+
+// ── Event log ──────────────────────────────────────────────────────────────
+function nodeClass(data) {
+  const m = data.match(/^\[([A-Z_]+)\]/);
+  if (!m) return 'node-info';
+  const n = m[1].toLowerCase();
+  if (n === 'done') return 'node-done';
+  if (n === 'error') return 'node-error';
+  return 'node-' + n;
+}
+
+function logEvent(text) {
+  const el = document.getElementById('eventLog');
+  const line = document.createElement('div');
+  line.className = 'log-line ' + nodeClass(text);
+  line.textContent = text;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function logInfo(text) {
+  const el = document.getElementById('eventLog');
+  const line = document.createElement('div');
+  line.className = 'log-line node-info';
+  line.textContent = '» ' + text;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearLog() {
+  document.getElementById('eventLog').innerHTML = '';
+  document.getElementById('soapPanel').style.display = 'none';
+  document.getElementById('soapContent').textContent = '';
+  document.getElementById('govBadges').innerHTML = '';
+}
+
+// ── SOAP note rendering ────────────────────────────────────────────────────
+function renderSoap(raw) {
+  const panel = document.getElementById('soapPanel');
+  panel.style.display = 'block';
+  const el = document.getElementById('soapContent');
+  // Bold the SUBJECTIVE/OBJECTIVE/ASSESSMENT/PLAN headers
+  el.innerHTML = raw.replace(
+    /(SUBJECTIVE:|OBJECTIVE:|ASSESSMENT:|PLAN:)/g,
+    '<span class="soap-section">$1</span>'
+  );
+  panel.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+
+function badge(label, value, type) {
+  const b = document.createElement('div');
+  b.className = 'gov-badge ' + (type || '');
+  b.textContent = label + ': ' + value;
+  document.getElementById('govBadges').appendChild(b);
+}
+
+function renderGovernance(finalState) {
+  if (!finalState) return;
+  const g = document.getElementById('govBadges');
+  g.innerHTML = '';
+  badge('oversight',      finalState.oversight_level || '?',
+        finalState.oversight_level === 'escalate' ? 'block' : finalState.oversight_level === 'mandatory' ? 'warn' : 'pass');
+  badge('human review',   finalState.human_review_required ? 'required' : 'not required',
+        finalState.human_review_required ? 'warn' : 'pass');
+  badge('fairness',       finalState.fairness_passed ? 'passed' : 'FAILED',
+        finalState.fairness_passed ? 'pass' : 'block');
+  badge('MOH',            finalState.moh_compliant ? 'compliant' : 'non-compliant',
+        finalState.moh_compliant ? 'pass' : 'block');
+  badge('output blocked', finalState.output_blocked ? 'YES' : 'no',
+        finalState.output_blocked ? 'block' : 'pass');
+  badge('SaMD class',     finalState.samd_class || '?', '');
+}
+
+// ── SSE streaming from a fetch (POST response) ────────────────────────────
+async function* readSSE(response) {
+  // Proper SSE parser — handles \r\n, \r, and \n line endings.
+  // sse_starlette sends \r\n\r\n as the event separator, so splitting naively
+  // on '\n\n' misses every event.  This parser processes line-by-line and
+  // dispatches on blank lines, matching the HTML SSE spec exactly.
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let currentData = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      if (currentData !== null) yield currentData;
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    // Split on any combo of CR+LF, CR-only, or LF-only
+    const lines = buffer.split(/\r\n|\r|\n/);
+    buffer = lines.pop();               // last element may be an incomplete line
+    for (const line of lines) {
+      if (line === '') {
+        // Blank line = dispatch accumulated event
+        if (currentData !== null) {
+          yield currentData;
+          currentData = null;
+        }
+      } else if (line.startsWith('data:')) {
+        const val = line.slice(5).replace(/^ /, ''); // strip single leading space
+        currentData = currentData === null ? val : currentData + '\n' + val;
+      }
+      // Ignore event:, id:, retry:, and comment (:) lines
+    }
+  }
+}
+
+// ── Process SSE events (shared by text + audio paths) ─────────────────────
+async function consumeStream(sseIterable) {
+  let finalState = null;
+  for await (const data of sseIterable) {
+    logEvent(data);
+    if (data.startsWith('[SUMMARY] soap_note:')) {
+      renderSoap(data.slice('[SUMMARY] soap_note:'.length).trimStart());
+    }
+    if (data === '[DONE]') break;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// HEALTH CHECK
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function checkHealth() {
+  const badge = document.getElementById('healthBadge');
+  badge.className = '';
+  badge.textContent = '● Checking…';
+  try {
+    const r = await fetch(base() + '/health');
+    const j = await r.json();
+    badge.className = 'ok';
+    badge.textContent = '● Status: OK';
+    logInfo('Health OK — model: ' + j.model + ', governance: ' + j.governance);
+  } catch (e) {
+    badge.className = 'error';
+    badge.textContent = '● Service Unavailable';
+    logInfo('Health check failed: ' + e.message);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SCHEMA DISCOVERY
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function loadSchema() {
+  const out = document.getElementById('schemaOut');
+  try {
+    const r = await fetch(base() + '/consult/schema');
+    const j = await r.json();
+    out.style.display = 'block';
+    out.textContent = JSON.stringify(j, null, 2);
+    logInfo('Schema loaded — fields: ' + Object.keys(j.patient_context_schema).join(', '));
+    // Pre-fill patient context form from schema defaults
+    const s = j.patient_context_schema;
+    if (s.age?.default)                 document.getElementById('pc-age').value = s.age.default;
+    if (s.gender?.default)              document.getElementById('pc-gender').value = s.gender.default;
+    if (s.known_conditions?.default)    document.getElementById('pc-conditions').value = s.known_conditions.default.join(', ');
+    if (s.current_medications?.default) document.getElementById('pc-medications').value = s.current_medications.default.join(', ');
+    if (s.allergies?.default)           document.getElementById('pc-allergies').value = s.allergies.default;
+  } catch (e) {
+    logInfo('Schema fetch failed: ' + e.message);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TEXT CONSULTATION  (POST /consult → GET /stream/{id})
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function submitText() {
+  const btn        = document.getElementById('submitTextBtn');
+  const transcript = document.getElementById('transcript').value.trim();
+  if (!transcript) { logInfo('Transcript is empty.'); return; }
+
+  clearLog();
+  const sessionId = genId();
+  setSession(sessionId);
+  btn.disabled = true;
+
+  logInfo('POST /consult  session=' + sessionId);
+
+  try {
+    // 1. Submit consultation
+    const res = await fetch(base() + '/consult', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        session_id:      sessionId,
+        transcript:      transcript,
+        patient_context: readPatientContext(),
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      logInfo('Submit error ' + res.status + ': ' + JSON.stringify(err.detail));
+      return;
+    }
+    const payload = await res.json();
+    logInfo('Queued — opening stream: ' + payload.stream_url);
+
+    // 2. Open SSE stream (GET — standard EventSource works here)
+    await new Promise((resolve) => {
+      const es = new EventSource(base() + payload.stream_url);
+      es.onmessage = (e) => {
+        logEvent(e.data);
+        if (e.data.startsWith('[SUMMARY] soap_note:')) {
+          renderSoap(e.data.slice('[SUMMARY] soap_note:'.length).trimStart());
+        }
+        if (e.data === '[DONE]' || e.data.startsWith('[ERROR]')) {
+          es.close();
+          resolve();
+          // 3. Fetch final state for governance badges
+          fetch(base() + '/session/' + sessionId)
+            .then(r => r.json())
+            .then(j => renderGovernance(j.final_state))
+            .catch(() => {});
+        }
+      };
+      es.onerror = () => { logInfo('Stream connection error.'); es.close(); resolve(); };
+    });
+
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AUDIO CONSULTATION  (POST /consult/audio — chunked audio/webm)
+// ══════════════════════════════════════════════════════════════════════════════
+
+let mediaRecorder   = null;
+let audioStream     = null;   // kept alive across recorder cycles
+let audioMimeType   = '';
+let audioSessionId  = null;
+let chunkIndex      = 0;
+let stopRequested   = false;
+let timerInterval   = null;
+let elapsedSeconds  = 0;
+const CHUNK_MS      = 10_000; // milliseconds per recording cycle
+
+function updateTimer() {
+  elapsedSeconds++;
+  const m = String(Math.floor(elapsedSeconds / 60)).padStart(2, '0');
+  const s = String(elapsedSeconds % 60).padStart(2, '0');
+  document.getElementById('recordTimer').textContent = m + ':' + s;
+}
+
+// Start a fresh MediaRecorder on the existing stream.
+// Each new instance writes its own EBML/WebM header, making the blob
+// a self-contained file that OpenAI STT can decode independently.
+function _startRecorderCycle() {
+  if (stopRequested) return;
+
+  const rec    = new MediaRecorder(audioStream, audioMimeType ? { mimeType: audioMimeType } : {});
+  mediaRecorder = rec;
+  const chunks = [];
+
+  rec.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) chunks.push(e.data);
+  };
+
+  rec.onstop = async () => {
+    if (!chunks.length) return;
+    const blob    = new Blob(chunks, { type: audioMimeType || 'audio/webm' });
+    const idx     = chunkIndex++;
+    const isFinal = stopRequested;
+
+    document.getElementById('chunkCounter').textContent = 'Chunks sent: ' + chunkIndex;
+    logInfo((isFinal ? 'Final' : 'Chunk ' + idx) + ' — ' + (blob.size / 1024).toFixed(1) + ' KB → transcribing…');
+
+    if (!isFinal) {
+      await sendAudioChunk(blob, idx, false);
+      if (stopRequested) {
+        // stopRecording() was called while this chunk was uploading; the
+        // recorder was already inactive so mediaRecorder.stop() was a no-op.
+        // Manually trigger the final path with an empty blob (all audio is
+        // already uploaded) so the backend receives is_final=true.
+        await sendFinalAudioChunk(new Blob([], { type: audioMimeType || 'audio/webm' }), chunkIndex++);
+        clearInterval(timerInterval);
+        audioStream.getTracks().forEach(t => t.stop());
+        document.getElementById('recDot').classList.remove('recording');
+        document.getElementById('startRecBtn').disabled = false;
+        document.getElementById('stopRecBtn').disabled  = true;
+      } else {
+        _startRecorderCycle();          // immediately begin next 10-second window
+      }
+    } else {
+      await sendFinalAudioChunk(blob, idx);
+      clearInterval(timerInterval);
+      audioStream.getTracks().forEach(t => t.stop());
+      document.getElementById('recDot').classList.remove('recording');
+      document.getElementById('startRecBtn').disabled = false;
+      document.getElementById('stopRecBtn').disabled  = true;
+    }
+  };
+
+  rec.start();
+  setTimeout(() => {
+    if (rec.state === 'recording') rec.stop();
+  }, CHUNK_MS);
+}
+
+async function startRecording() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    logInfo('getUserMedia not supported in this browser.');
+    return;
+  }
+  clearLog();
+  audioSessionId = genId();
+  chunkIndex     = 0;
+  stopRequested  = false;
+  elapsedSeconds = 0;
+  setSession(audioSessionId);
+  document.getElementById('captionBox').innerHTML = '<span style="color:var(--muted)">Waiting for first chunk…</span>';
+  document.getElementById('chunkCounter').textContent = 'Chunks sent: 0';
+
+  try {
+    audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    logInfo('Microphone access denied: ' + e.message);
+    return;
+  }
+
+  // Prefer audio/webm;codecs=opus; fall back to plain webm or browser default
+  audioMimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+    ? 'audio/webm;codecs=opus'
+    : MediaRecorder.isTypeSupported('audio/webm')
+    ? 'audio/webm'
+    : '';
+
+  logInfo('Recorder mimeType: ' + (audioMimeType || '(browser default)') + ' — cycle: ' + (CHUNK_MS / 1000) + 's');
+
+  document.getElementById('recDot').classList.add('recording');
+  document.getElementById('startRecBtn').disabled = true;
+  document.getElementById('stopRecBtn').disabled  = false;
+  timerInterval = setInterval(updateTimer, 1000);
+
+  _startRecorderCycle();
+}
+
+function stopRecording() {
+  // Set flag BEFORE calling stop() so onstop sees it as the final chunk even
+  // if the 10-second timeout fires between now and when onstop executes.
+  stopRequested = true;
+  clearInterval(timerInterval);
+  document.getElementById('recDot').classList.remove('recording');
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+  }
+}
+
+// Non-final chunk → JSON response → update caption
+async function sendAudioChunk(blob, idx, isFinal) {
+  const url = base() + '/consult/audio'
+    + '?session_id='    + encodeURIComponent(audioSessionId)
+    + '&chunk_index='   + idx
+    + '&is_final=false';
+  try {
+    const res = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'audio/webm' },
+      body:    blob,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      logInfo('Chunk ' + idx + ' error ' + res.status + ': ' + (err.detail || ''));
+      return;
+    }
+    const j = await res.json();
+    logInfo('Chunk ' + idx + ' transcribed: "' + (j.chunk_transcript || '(empty)') + '"');
+    document.getElementById('captionBox').textContent = j.accumulated_transcript || '';
+  } catch (e) {
+    logInfo('Chunk ' + idx + ' fetch error: ' + e.message);
+  }
+}
+
+// Final chunk → SSE stream response
+async function sendFinalAudioChunk(blob, idx) {
+  const context = readPatientContext();
+  const url = base() + '/consult/audio'
+    + '?session_id='       + encodeURIComponent(audioSessionId)
+    + '&chunk_index='      + idx
+    + '&is_final=true'
+    + '&patient_context='  + encodeURIComponent(JSON.stringify(context));
+
+  logInfo('Final chunk sent — waiting for SSE stream…');
+  try {
+    const res = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'audio/webm' },
+      body:    blob,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      logInfo('Final chunk error ' + res.status + ': ' + (err.detail || ''));
+      return;
+    }
+    // Response is text/event-stream — read with streaming fetch
+    await consumeStream(readSSE(res));
+    // Fetch final state for governance badges
+    fetch(base() + '/session/' + audioSessionId)
+      .then(r => r.json())
+      .then(j => renderGovernance(j.final_state))
+      .catch(() => {});
+  } catch (e) {
+    logInfo('Final chunk stream error: ' + e.message);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Origin check ──────────────────────────────────────────────────────────
+// Browsers send Origin: null for file:// pages. Warn the user and suggest fix.
+(function () {
+  const isFile = location.protocol === 'file:';
+  if (isFile) {
+    document.getElementById('corsWarning').style.display = 'block';
+  }
+
+})();
+
+checkHealth();
+</script>
+</body>
+</html>
