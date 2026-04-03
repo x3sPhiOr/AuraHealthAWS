@@ -25,6 +25,7 @@ env:
   ECR_REPOSITORY: ah/aurahealthaws
   APP_RUNNER_SERVICE_NAME: aurahealthaws
   APP_RUNNER_SERVICE_ARN: ${{ vars.APP_RUNNER_SERVICE_ARN || '' }}
+  S3_BUCKET: aurahealth
 
 # ──────────────────────────────────────────────────────────────────────────────
 jobs:
@@ -122,6 +123,29 @@ jobs:
           echo "Pushed :$IMAGE_TAG"
           echo "Pushed :latest"
 
+      # ── Upload static HTML clients to S3 ────────────────────────────────────
+      - name: Upload static clients to S3
+        env:
+          REGION: ${{ steps.vars.outputs.region }}
+          S3_BUCKET: ${{ env.S3_BUCKET }}
+        run: |
+          if [ -z "$S3_BUCKET" ]; then
+            echo "::error::S3 bucket is not configured. Set repository variable S3_BUCKET."
+            exit 1
+          fi
+
+          aws s3 cp prod_client.html "s3://$S3_BUCKET/prod_client.html" \
+            --region "$REGION" \
+            --content-type "text/html" \
+            --cache-control "no-cache"
+
+          aws s3 cp test_client.html "s3://$S3_BUCKET/test_client.html" \
+            --region "$REGION" \
+            --content-type "text/html" \
+            --cache-control "no-cache"
+
+          echo "Uploaded prod_client.html and test_client.html to s3://$S3_BUCKET/"
+
       # ── Trigger App Runner deployment explicitly ──────────────────────────────
       # AutoDeploymentsEnabled=true in the service config already watches :latest,
       # but start-deployment provides immediate feedback and a deployment ID to track.
@@ -174,6 +198,7 @@ jobs:
           IMAGE_URI: ${{ steps.push.outputs.image_uri }}
           IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
           REGION: ${{ steps.vars.outputs.region }}
+          S3_BUCKET: ${{ env.S3_BUCKET }}
         run: |
           echo "## Deploy Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -183,6 +208,7 @@ jobs:
           echo "| Image tag (SHA) | \`$IMAGE_TAG\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Region | \`$REGION\` |" >> $GITHUB_STEP_SUMMARY
           echo "| ECR repository | \`${{ env.ECR_REPOSITORY }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| S3 bucket | \`$S3_BUCKET\` |" >> $GITHUB_STEP_SUMMARY
           echo "| App Runner service | \`${{ env.APP_RUNNER_SERVICE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Triggered by | \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
