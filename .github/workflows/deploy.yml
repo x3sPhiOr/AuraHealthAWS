@@ -22,7 +22,9 @@ env:
   # Override via a GitHub Actions repository variable (Settings → Variables)
   # so you don't have to change this file for different environments.
   AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
-  SERVICE_NAME: aurahealthaws
+  ECR_REPOSITORY: ah/aurahealthaws
+  APP_RUNNER_SERVICE_NAME: aurahealthaws
+  APP_RUNNER_SERVICE_ARN: ${{ vars.APP_RUNNER_SERVICE_ARN || '' }}
 
 # ──────────────────────────────────────────────────────────────────────────────
 jobs:
@@ -82,14 +84,14 @@ jobs:
           REGION: ${{ steps.vars.outputs.region }}
         run: |
           aws ecr describe-repositories \
-            --repository-names "${{ env.SERVICE_NAME }}" \
+            --repository-names "${{ env.ECR_REPOSITORY }}" \
             --region "$REGION" > /dev/null 2>&1 \
           || aws ecr create-repository \
-            --repository-name "${{ env.SERVICE_NAME }}" \
+            --repository-name "${{ env.ECR_REPOSITORY }}" \
             --region "$REGION" \
             --image-scanning-configuration scanOnPush=true \
             --encryption-configuration encryptionType=AES256
-          echo "ECR repository ready: ${{ env.SERVICE_NAME }}"
+          echo "ECR repository ready: ${{ env.ECR_REPOSITORY }}"
 
       # ── Build for linux/amd64 (App Runner requirement) ───────────────────────
       - name: Build Docker image
@@ -99,10 +101,10 @@ jobs:
         run: |
           docker build \
             --platform linux/amd64 \
-            -t "$ECR_REGISTRY/${{ env.SERVICE_NAME }}:$IMAGE_TAG" \
-            -t "$ECR_REGISTRY/${{ env.SERVICE_NAME }}:latest" \
+            -t "$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG" \
+            -t "$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest" \
             .
-          echo "Build complete — $ECR_REGISTRY/${{ env.SERVICE_NAME }}:$IMAGE_TAG"
+          echo "Build complete — $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG"
 
       # ── Push both the SHA tag and :latest ────────────────────────────────────
       # Two tags: :latest triggers App Runner AutoDeployments; the SHA tag gives
@@ -113,9 +115,9 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
         run: |
-          docker push "$ECR_REGISTRY/${{ env.SERVICE_NAME }}:$IMAGE_TAG"
-          docker push "$ECR_REGISTRY/${{ env.SERVICE_NAME }}:latest"
-          IMAGE_URI="$ECR_REGISTRY/${{ env.SERVICE_NAME }}:latest"
+          docker push "$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest"
+          IMAGE_URI="$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest"
           echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
           echo "Pushed :$IMAGE_TAG"
           echo "Pushed :latest"
@@ -126,14 +128,30 @@ jobs:
       - name: Trigger App Runner deployment
         env:
           REGION: ${{ steps.vars.outputs.region }}
+          SERVICE_ARN_FROM_VAR: ${{ env.APP_RUNNER_SERVICE_ARN }}
         run: |
-          SERVICE_ARN=$(aws apprunner list-services \
-            --region "$REGION" \
-            --query "ServiceSummaryList[?ServiceName=='${{ env.SERVICE_NAME }}'].ServiceArn | [0]" \
-            --output text)
+          SERVICE_ARN="$SERVICE_ARN_FROM_VAR"
+
+          if [ -z "$SERVICE_ARN" ]; then
+            set +e
+            SERVICE_ARN=$(aws apprunner list-services \
+              --region "$REGION" \
+              --query "ServiceSummaryList[?ServiceName=='${{ env.APP_RUNNER_SERVICE_NAME }}'].ServiceArn | [0]" \
+              --output text 2>/tmp/apprunner_list_err)
+            LIST_EXIT=$?
+            set -e
+
+            if [ $LIST_EXIT -ne 0 ]; then
+              echo "::warning::Unable to call apprunner:ListServices with current IAM user."
+              echo "::warning::Skipping explicit start-deployment; rely on App Runner AutoDeploymentsEnabled=true."
+              echo "::warning::To force immediate deploy, set repo variable APP_RUNNER_SERVICE_ARN or grant apprunner:ListServices."
+              cat /tmp/apprunner_list_err || true
+              exit 0
+            fi
+          fi
 
           if [ -z "$SERVICE_ARN" ] || [ "$SERVICE_ARN" = "None" ]; then
-            echo "::warning::App Runner service '${{ env.SERVICE_NAME }}' not found."
+            echo "::warning::App Runner service '${{ env.APP_RUNNER_SERVICE_NAME }}' not found."
             echo "First-time setup — create the service with:"
             echo "  aws apprunner create-service \\"
             echo "    --cli-input-json file://deploy/apprunner-service.json \\"
@@ -164,7 +182,8 @@ jobs:
           echo "| Image (latest) | \`$IMAGE_URI\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Image tag (SHA) | \`$IMAGE_TAG\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Region | \`$REGION\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Service | \`${{ env.SERVICE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| ECR repository | \`${{ env.ECR_REPOSITORY }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| App Runner service | \`${{ env.APP_RUNNER_SERVICE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Triggered by | \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "_To roll back, re-tag the previous SHA image as \`:latest\` and push._" >> $GITHUB_STEP_SUMMARY
