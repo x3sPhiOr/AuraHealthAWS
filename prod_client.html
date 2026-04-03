@@ -706,6 +706,10 @@ async function consumeStream(sseIterable) {
   let finalState = null;
   for await (const data of sseIterable) {
     logEvent(data);
+    if (data.startsWith('[STT] accumulated_transcript:')) {
+      document.getElementById('captionBox').textContent =
+        data.slice('[STT] accumulated_transcript:'.length).trimStart();
+    }
     if (data.startsWith('[SUMMARY] soap_note:')) {
       renderSoap(data.slice('[SUMMARY] soap_note:'.length).trimStart());
     }
