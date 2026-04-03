@@ -888,21 +888,29 @@ function _startRecorderCycle() {
     logInfo((isFinal ? 'Final' : 'Chunk ' + idx) + ' — ' + (blob.size / 1024).toFixed(1) + ' KB → transcribing…');
 
     if (!isFinal) {
+      // Start the next cycle immediately (before awaiting upload) so there is
+      // no gap between chunks. The existing audioStream stays alive; the new
+      // MediaRecorder instance begins capturing while this blob is uploading.
+      // If stop was already requested we skip starting a new cycle and handle
+      // the final-chunk path below after the upload completes.
+      const newCycleStarted = !stopRequested;
+      if (newCycleStarted) _startRecorderCycle();
+
       await sendAudioChunk(blob, idx, false);
-      if (stopRequested) {
-        // stopRecording() was called while this chunk was uploading; the
-        // recorder was already inactive so mediaRecorder.stop() was a no-op.
-        // Manually trigger the final path with an empty blob (all audio is
-        // already uploaded) so the backend receives is_final=true.
+
+      if (!newCycleStarted && stopRequested) {
+        // Stop was requested before the new cycle could start — no other
+        // onstop will run, so send the final signal and clean up here.
         await sendFinalAudioChunk(new Blob([], { type: audioMimeType || 'audio/webm' }), chunkIndex++);
         clearInterval(timerInterval);
         audioStream.getTracks().forEach(t => t.stop());
         document.getElementById('recDot').classList.remove('recording');
         document.getElementById('startRecBtn').disabled = false;
         document.getElementById('stopRecBtn').disabled  = true;
-      } else {
-        _startRecorderCycle();          // immediately begin next 10-second window
       }
+      // If newCycleStarted and stop was pressed during the upload,
+      // stopRecording() already stopped the new recorder; its own onstop
+      // will fire with isFinal=true and handle the final chunk + cleanup.
     } else {
       await sendFinalAudioChunk(blob, idx);
       clearInterval(timerInterval);
