@@ -353,8 +353,10 @@
 <header>
   <h1>🩺 Aura Health</h1>
   <input id="baseUrl" type="text" value="https://waz6fna5ax.us-east-1.awsapprunner.com" style="display:none;" />
+  <label style="margin-left:20px;">API Key <span style="color:var(--red);">*</span></label>
+  <input id="apiKey" type="password" value="" placeholder="Enter your API key..." style="width:180px;" />
   <span id="sessionBadge" style="display:none;">No active session</span>
-  <span id="healthBadge">● Checking…</span>
+  <span id="healthBadge" style="margin-left:auto;">● Checking…</span>
 </header>
 
 <!-- ══ MAIN ═════════════════════════════════════════════════════════════════ -->
@@ -485,6 +487,21 @@ Patient: I have had persistent chest tightness and shortness of breath on exerti
 
 function base() {
   return document.getElementById('baseUrl').value.replace(/\/+$/, '');
+}
+
+function getApiKey() {
+  return document.getElementById('apiKey').value.trim();
+}
+
+function getAuthHeaders() {
+  // Build Authorization header if API key is provided
+  // Health check doesn't require auth but will accept it
+  const key = getApiKey();
+  const headers = {};
+  if (key) {
+    headers['Authorization'] = 'Bearer ' + key;
+  }
+  return headers;
 }
 
 function genId() {
@@ -705,7 +722,9 @@ async function checkHealth() {
   badge.className = '';
   badge.textContent = '● Checking…';
   try {
-    const r = await fetch(base() + '/health');
+    const r = await fetch(base() + '/health', {
+      headers: getAuthHeaders(),
+    });
     const j = await r.json();
     badge.className = 'ok';
     badge.textContent = '● Status: OK';
@@ -724,7 +743,9 @@ async function checkHealth() {
 async function loadSchema() {
   const out = document.getElementById('schemaOut');
   try {
-    const r = await fetch(base() + '/consult/schema');
+    const r = await fetch(base() + '/consult/schema', {
+      headers: getAuthHeaders(),
+    });
     const j = await r.json();
     out.style.display = 'block';
     out.textContent = JSON.stringify(j, null, 2);
@@ -761,7 +782,7 @@ async function submitText() {
     // 1. Submit consultation
     const res = await fetch(base() + '/consult', {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
       body:    JSON.stringify({
         session_id:      sessionId,
         transcript:      transcript,
@@ -788,7 +809,9 @@ async function submitText() {
           es.close();
           resolve();
           // 3. Fetch final state for governance badges
-          fetch(base() + '/session/' + sessionId)
+          fetch(base() + '/session/' + sessionId, {
+            headers: getAuthHeaders(),
+          })
             .then(r => r.json())
             .then(j => renderGovernance(j.final_state))
             .catch(() => {});
@@ -936,7 +959,7 @@ async function sendAudioChunk(blob, idx, isFinal) {
   try {
     const res = await fetch(url, {
       method:  'POST',
-      headers: { 'Content-Type': 'audio/webm' },
+      headers: { ...getAuthHeaders(), 'Content-Type': 'audio/webm' },
       body:    blob,
     });
     if (!res.ok) {
@@ -965,7 +988,7 @@ async function sendFinalAudioChunk(blob, idx) {
   try {
     const res = await fetch(url, {
       method:  'POST',
-      headers: { 'Content-Type': 'audio/webm' },
+      headers: { ...getAuthHeaders(), 'Content-Type': 'audio/webm' },
       body:    blob,
     });
     if (!res.ok) {
@@ -976,7 +999,9 @@ async function sendFinalAudioChunk(blob, idx) {
     // Response is text/event-stream — read with streaming fetch
     await consumeStream(readSSE(res));
     // Fetch final state for governance badges
-    fetch(base() + '/session/' + audioSessionId)
+    fetch(base() + '/session/' + audioSessionId, {
+      headers: getAuthHeaders(),
+    })
       .then(r => r.json())
       .then(j => renderGovernance(j.final_state))
       .catch(() => {});
