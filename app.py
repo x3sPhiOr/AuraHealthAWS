@@ -42,6 +42,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # ── 4. HuggingFace ────────────────────────────────────────────────────────────
 from huggingface_hub import InferenceClient
@@ -86,6 +87,9 @@ KB_ENABLE_PUBMED            = os.getenv("KB_ENABLE_PUBMED", "false").lower() == 
 KB_ENABLE_OPENFDA           = os.getenv("KB_ENABLE_OPENFDA", "false").lower() == "true"
 KB_ENABLE_OPENFDA_ZIP       = os.getenv("KB_ENABLE_OPENFDA_ZIP", "false").lower() == "true"
 KB_ENABLE_OPENFDA_EVENT     = os.getenv("KB_ENABLE_OPENFDA_EVENT", "false").lower() == "true"
+
+RAG_CHUNK_SIZE              = int(os.getenv("RAG_CHUNK_SIZE", "900"))
+RAG_CHUNK_OVERLAP           = int(os.getenv("RAG_CHUNK_OVERLAP", "150"))
 
 CDC_GUIDELINE_URLS = [
     u.strip()
@@ -353,6 +357,15 @@ def seed_docs() -> list:
         Document(page_content="Type 2 diabetes HbA1c targets are commonly <7 percent for many adults, with individualized goals based on comorbidity and frailty.", metadata={"source": "Seed: ADA style", "category": "endocrinology"}),
         Document(page_content="Drug interaction: ACE inhibitors and NSAIDs can reduce antihypertensive efficacy and raise risk of kidney injury in susceptible patients.", metadata={"source": "Seed: Interaction", "category": "drug_interaction"}),
         Document(page_content="Shortness of breath workup may include pulse oximetry, respiratory rate, chest x-ray, and consideration of PE, CHF, COPD, and pneumonia.", metadata={"source": "Seed: Respiratory triage", "category": "respiratory"}),
+        Document(page_content="Common cold (viral URI) usually includes runny nose, nasal congestion, sore throat, cough, and low-grade fever. Supportive care includes fluids, rest, and symptomatic relief. Antibiotics are not indicated for uncomplicated viral colds.", metadata={"source": "Seed: Primary care URI", "category": "common_illness"}),
+        Document(page_content="Influenza-like illness often presents with acute fever, myalgia, headache, fatigue, cough, and sore throat. Higher-risk patients (older adults, pregnancy, chronic disease, immunocompromise) may benefit from early antiviral evaluation.", metadata={"source": "Seed: Influenza triage", "category": "common_illness"}),
+        Document(page_content="Fever in adults is commonly defined as temperature >=38.0 C. Initial assessment includes symptom duration, exposure history, hydration status, and red flags such as confusion, persistent vomiting, severe shortness of breath, or hypotension.", metadata={"source": "Seed: Fever assessment", "category": "common_illness"}),
+        Document(page_content="Acute uncomplicated headache can be tension-type or migraine. Red flags that require urgent in-person evaluation include thunderclap onset, focal neurologic deficits, fever with neck stiffness, head trauma, altered mental status, or new headache in older age.", metadata={"source": "Seed: Headache triage", "category": "neurology"}),
+        Document(page_content="Acute diarrhea is often viral and self-limited. Focus on oral rehydration and monitoring for dehydration. Escalate care for blood in stool, persistent high fever, severe abdominal pain, signs of dehydration, or symptoms lasting beyond several days.", metadata={"source": "Seed: GI triage", "category": "gastrointestinal"}),
+        Document(page_content="Nausea and vomiting management prioritizes hydration and electrolyte balance. Warning signs include inability to keep fluids down, bilious or bloody emesis, severe abdominal pain, pregnancy-related dehydration risk, and symptoms of metabolic disturbance.", metadata={"source": "Seed: GI symptom care", "category": "gastrointestinal"}),
+        Document(page_content="Sore throat is commonly viral. Consider streptococcal pharyngitis when fever, tonsillar exudate, and tender anterior cervical nodes are present without cough. Immediate evaluation is needed for airway compromise, drooling, muffled voice, or unilateral neck swelling.", metadata={"source": "Seed: ENT triage", "category": "common_illness"}),
+        Document(page_content="Acute cough with cold symptoms is usually viral bronchitis or URI. Evaluate urgently when there is chest pain, hemoptysis, oxygen desaturation, severe dyspnea, or persistent fever suggesting pneumonia or another serious cause.", metadata={"source": "Seed: Cough triage", "category": "respiratory"}),
+        Document(page_content="General safety: emergency red flags across common illness include severe chest pain, severe shortness of breath, confusion, seizure, syncope, unilateral weakness, cyanosis, uncontrolled bleeding, or rapidly worsening symptoms.", metadata={"source": "Seed: Universal red flags", "category": "clinical_safety"}),
     ]
 
 
@@ -599,8 +612,15 @@ if not CLINICAL_DOCS:
         "KB_ENABLE_PUBMED / KB_ENABLE_OPENFDA / KB_ENABLE_OPENFDA_EVENT / KB_ENABLE_OPENFDA_ZIP."
     )
 
-print(f"Building FAISS index from {len(CLINICAL_DOCS)} documents...")
-vectorstore = FAISS.from_documents(CLINICAL_DOCS, embeddings)
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=RAG_CHUNK_SIZE,
+    chunk_overlap=RAG_CHUNK_OVERLAP,
+    separators=["\n\n", "\n", ". ", " ", ""],
+)
+CHUNKED_DOCS = splitter.split_documents(CLINICAL_DOCS)
+
+print(f"Building FAISS index from {len(CLINICAL_DOCS)} documents -> {len(CHUNKED_DOCS)} chunks...")
+vectorstore = FAISS.from_documents(CHUNKED_DOCS, embeddings)
 retriever   = vectorstore.as_retriever(search_kwargs={"k": 3})
 
 source_counts: dict = {}
