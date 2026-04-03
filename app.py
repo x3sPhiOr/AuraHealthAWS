@@ -21,9 +21,8 @@ import warnings
 from typing import TypedDict, Annotated, List, Optional, Literal
 from datetime import datetime
 from pathlib import Path
-import logging
 from urllib.parse import urlencode, quote_plus
-from urllib.request import Request as UrllibRequest, urlopen
+from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 
 # ── 2. Third-party: env, async ────────────────────────────────────────────────
@@ -403,7 +402,7 @@ def fetch_cdc_docs(urls: list) -> list:
     docs = []
     for url in urls:
         try:
-            req = UrllibRequest(url, headers={"User-Agent": "Mozilla/5.0 aura-health-rag"})
+            req = Request(url, headers={"User-Agent": "Mozilla/5.0 aura-health-rag"})
             with urlopen(req, timeout=25) as r:
                 html_text = r.read().decode("utf-8", errors="ignore")
             text = clean_text(html_text, max_chars=3500)
@@ -1279,15 +1278,12 @@ def health():
 audio_sessions: dict = {}
 
 
-async def _transcribe_webm(audio_bytes: bytes, chunk_index: int, prompt: str = "") -> str:
+async def _transcribe_webm(audio_bytes: bytes, chunk_index: int) -> str:
     """
     Transcribe a raw audio/webm blob via OpenAI STT.
 
     Tries STT_OPENAI_MODEL first, then each model in STT_OPENAI_FALLBACK_MODELS
     in order.  Raises RuntimeError if all candidates fail.
-
-    prompt — optional tail of the previous chunk's transcript passed as context
-    so the model can correctly transcribe words that span a chunk boundary.
     """
     from openai import AsyncOpenAI, APIError
 
@@ -1303,7 +1299,6 @@ async def _transcribe_webm(audio_bytes: bytes, chunk_index: int, prompt: str = "
             seen.add(m)
             candidates.append(m)
 
-    extra = {"prompt": prompt} if prompt else {}
     last_error: Exception = RuntimeError("No STT models configured.")
     for model in candidates:
         try:
@@ -1314,7 +1309,6 @@ async def _transcribe_webm(audio_bytes: bytes, chunk_index: int, prompt: str = "
                 model=model,
                 file=buf,
                 language=STT_LANGUAGE,
-                **extra,
             )
             return (response.text or "").strip()
         except APIError as e:
@@ -1328,36 +1322,6 @@ async def _transcribe_webm(audio_bytes: bytes, chunk_index: int, prompt: str = "
             raise RuntimeError(f"Unexpected STT error with model '{model}': {e}") from e
 
     raise RuntimeError(f"All STT models exhausted. Last error: {last_error}")
-
-
-async def _stt_worker(sid: str) -> None:
-    """
-    Background task: drains the per-session chunk queue in arrival order.
-
-    Passes the tail of the previous chunk's transcript as a prompt to the
-    transcription API so words spoken across a chunk boundary are not lost —
-    the same role the continuous audio buffer plays in the local stt_agent.
-    Sends a None sentinel to stop.
-    """
-    session = audio_sessions[sid]
-    queue: asyncio.Queue = session["queue"]
-    while True:
-        item = await queue.get()
-        if item is None:          # sentinel — no more chunks
-            queue.task_done()
-            break
-        chunk_index, audio_bytes = item
-        prompt = session.get("last_tail", "")
-        try:
-            text = await _transcribe_webm(audio_bytes, chunk_index, prompt=prompt)
-        except Exception as exc:
-            text = ""
-            logging.warning("STT worker error on chunk %d for session %s: %s", chunk_index, sid, exc)
-        session["transcripts"].append(text)
-        session["accumulated"] = " ".join(t for t in session["transcripts"] if t).strip()
-        # Keep last 50 words as prompt context for the next chunk.
-        session["last_tail"] = " ".join(text.split()[-50:])
-        queue.task_done()
 
 
 @api.post("/consult/audio")
@@ -1407,21 +1371,22 @@ async def consult_audio(
         # Each blob is a complete, self-contained WebM file (the frontend
         # stop/starts MediaRecorder every 10 s so every chunk has its own
         # EBML header).  Transcripts are accumulated across chunks.
-        #
-        # A background worker task drains the queue in arrival order and
-        # passes the tail of the previous transcript as prompt context to the
-        # API, so words spoken at a chunk boundary are not lost.
-        q: asyncio.Queue = asyncio.Queue()
-        audio_sessions[sid] = {
-            "transcripts": [], "accumulated": "", "last_tail": "",
-            "queue": q,
-            "worker": asyncio.create_task(_stt_worker(sid)),
-        }
+        audio_sessions[sid] = {"transcripts": [], "accumulated": ""}
 
     if audio_bytes:
-        # Enqueue the blob — the worker transcribes it in the background so
-        # this HTTP handler returns immediately.
-        await audio_sessions[sid]["queue"].put((chunk_index, audio_bytes))
+        try:
+            chunk_transcript = await _transcribe_webm(audio_bytes, chunk_index)
+        except ValueError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+        except RuntimeError as e:
+            raise HTTPException(status_code=502, detail=f"STT failed: {e}")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Unexpected error during transcription: {e}")
+
+        audio_sessions[sid]["transcripts"].append(chunk_transcript)
+        audio_sessions[sid]["accumulated"] = " ".join(
+            t for t in audio_sessions[sid]["transcripts"] if t
+        ).strip()
 
     accumulated = audio_sessions[sid]["accumulated"]
 
@@ -1430,22 +1395,12 @@ async def consult_audio(
         return {
             "session_id":             sid,
             "chunk_index":            chunk_index,
-            # accumulated reflects all chunks the worker has finished so far.
-            "chunk_transcript":       accumulated,
+            "chunk_transcript":       chunk_transcript,
             "accumulated_transcript": accumulated,
             "status":                 "accumulating",
         }
 
-    # ── Final: drain the transcription queue before starting the pipeline ───────
-    # Send the sentinel so the worker knows no more chunks are coming, then
-    # wait for every enqueued blob to be transcribed before we read accumulated.
-    session = audio_sessions[sid]
-    await session["queue"].put(None)          # sentinel
-    await session["queue"].join()             # block until worker finishes
-    session["worker"].cancel()                # clean up the task
-
-    accumulated = session["accumulated"]
-
+    # ── Final: parse patient context, init session, return SSE stream ─────────
     try:
         raw_context = json.loads(patient_context)
     except json.JSONDecodeError:
