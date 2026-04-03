@@ -1,0 +1,179 @@
+name: "Aura Health — Deploy to Amazon ECR + App Runner"
+
+on:
+  # Auto-trigger only after the full LLMSecOps pipeline passes on main.
+  # This guarantees no image is pushed to ECR unless all security/governance
+  # gates have been cleared first.
+  workflow_run:
+    workflows: ["Aura Health — LLMSecOps + AI Governance Pipeline"]
+    types: [completed]
+    branches: [main]
+
+  # Allow a manual re-deploy (e.g. config-only change, rollback) without
+  # re-running all CI gates.
+  workflow_dispatch:
+    inputs:
+      aws_region:
+        description: "AWS region (overrides the repo variable)"
+        required: false
+        default: ""
+      image_tag:
+        description: "Custom image tag suffix (default: git SHA)"
+        required: false
+        default: ""
+
+env:
+  # Override via a GitHub Actions repository variable (Settings → Variables)
+  # so you don't have to change this file for different environments.
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
+  SERVICE_NAME: aurahealthaws
+
+# ──────────────────────────────────────────────────────────────────────────────
+jobs:
+  deploy:
+    name: "Build → ECR push → App Runner deploy"
+    runs-on: ubuntu-latest
+
+    # For workflow_run events:  only proceed if the CI pipeline succeeded.
+    # For workflow_dispatch:    always run (the engineer is explicitly requesting it).
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    permissions:
+      contents: read
+      # Uncomment the line below if you switch to OIDC (recommended for prod):
+      # id-token: write
+
+    steps:
+      # ── Checkout the exact commit that was validated by the CI pipeline ──────
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      # ── Resolve region and image tag ─────────────────────────────────────────
+      - name: Resolve deploy variables
+        id: vars
+        run: |
+          REGION="${{ github.event.inputs.aws_region }}"
+          if [ -z "$REGION" ]; then REGION="${{ env.AWS_REGION }}"; fi
+
+          TAG="${{ github.event.inputs.image_tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="${{ github.event.workflow_run.head_sha || github.sha }}"
+          fi
+          # Shorten to 12-char prefix for readability
+          TAG="${TAG:0:12}"
+
+          echo "region=$REGION"   >> $GITHUB_OUTPUT
+          echo "image_tag=$TAG"   >> $GITHUB_OUTPUT
+          echo "Resolved region  : $REGION"
+          echo "Resolved image tag: $TAG"
+
+      # ── Authenticate to AWS ───────────────────────────────────────────────────
+      # Store AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in GitHub Secrets.
+      # For production, replace with OIDC (role-to-assume) to avoid long-lived keys.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ steps.vars.outputs.region }}
+
+      # ── Log in Docker to ECR ──────────────────────────────────────────────────
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # ── Ensure the ECR repository exists (idempotent) ────────────────────────
+      - name: Ensure ECR repository exists
+        env:
+          REGION: ${{ steps.vars.outputs.region }}
+        run: |
+          aws ecr describe-repositories \
+            --repository-names "${{ env.SERVICE_NAME }}" \
+            --region "$REGION" > /dev/null 2>&1 \
+          || aws ecr create-repository \
+            --repository-name "${{ env.SERVICE_NAME }}" \
+            --region "$REGION" \
+            --image-scanning-configuration scanOnPush=true \
+            --encryption-configuration encryptionType=AES256
+          echo "ECR repository ready: ${{ env.SERVICE_NAME }}"
+
+      # ── Build for linux/amd64 (App Runner requirement) ───────────────────────
+      - name: Build Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
+        run: |
+          docker build \
+            --platform linux/amd64 \
+            -t "$ECR_REGISTRY/${{ env.SERVICE_NAME }}:$IMAGE_TAG" \
+            -t "$ECR_REGISTRY/${{ env.SERVICE_NAME }}:latest" \
+            .
+          echo "Build complete — $ECR_REGISTRY/${{ env.SERVICE_NAME }}:$IMAGE_TAG"
+
+      # ── Push both the SHA tag and :latest ────────────────────────────────────
+      # Two tags: :latest triggers App Runner AutoDeployments; the SHA tag gives
+      # an immutable reference used in the job summary and for rollbacks.
+      - name: Push to ECR
+        id: push
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
+        run: |
+          docker push "$ECR_REGISTRY/${{ env.SERVICE_NAME }}:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/${{ env.SERVICE_NAME }}:latest"
+          IMAGE_URI="$ECR_REGISTRY/${{ env.SERVICE_NAME }}:latest"
+          echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
+          echo "Pushed :$IMAGE_TAG"
+          echo "Pushed :latest"
+
+      # ── Trigger App Runner deployment explicitly ──────────────────────────────
+      # AutoDeploymentsEnabled=true in the service config already watches :latest,
+      # but start-deployment provides immediate feedback and a deployment ID to track.
+      - name: Trigger App Runner deployment
+        env:
+          REGION: ${{ steps.vars.outputs.region }}
+        run: |
+          SERVICE_ARN=$(aws apprunner list-services \
+            --region "$REGION" \
+            --query "ServiceSummaryList[?ServiceName=='${{ env.SERVICE_NAME }}'].ServiceArn | [0]" \
+            --output text)
+
+          if [ -z "$SERVICE_ARN" ] || [ "$SERVICE_ARN" = "None" ]; then
+            echo "::warning::App Runner service '${{ env.SERVICE_NAME }}' not found."
+            echo "First-time setup — create the service with:"
+            echo "  aws apprunner create-service \\"
+            echo "    --cli-input-json file://deploy/apprunner-service.json \\"
+            echo "    --region $REGION"
+            echo "Subsequent pushes will be picked up by AutoDeploymentsEnabled=true."
+          else
+            DEPLOYMENT_ID=$(aws apprunner start-deployment \
+              --service-arn "$SERVICE_ARN" \
+              --region "$REGION" \
+              --query "OperationId" \
+              --output text)
+            echo "App Runner deployment started."
+            echo "  Service ARN  : $SERVICE_ARN"
+            echo "  Operation ID : $DEPLOYMENT_ID"
+          fi
+
+      # ── Write a step summary visible in the Actions UI ───────────────────────
+      - name: Job summary
+        env:
+          IMAGE_URI: ${{ steps.push.outputs.image_uri }}
+          IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
+          REGION: ${{ steps.vars.outputs.region }}
+        run: |
+          echo "## Deploy Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Key | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Image (latest) | \`$IMAGE_URI\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image tag (SHA) | \`$IMAGE_TAG\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Region | \`$REGION\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | \`${{ env.SERVICE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Triggered by | \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_To roll back, re-tag the previous SHA image as \`:latest\` and push._" >> $GITHUB_STEP_SUMMARY
