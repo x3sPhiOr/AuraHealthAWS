@@ -61,13 +61,14 @@ jobs:
           echo "Resolved image tag: $TAG"
 
       # ── Authenticate to AWS ───────────────────────────────────────────────────
-      # Store AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in GitHub Secrets.
+      # Use dedicated deploy credentials (separate from any local/dev keys):
+      # AWS_ECR_ACCESS_KEY_ID and AWS_ECR_SECRET_ACCESS_KEY.
       # For production, replace with OIDC (role-to-assume) to avoid long-lived keys.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ secrets.AWS_ECR_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_ECR_SECRET_ACCESS_KEY }}
           aws-region: ${{ steps.vars.outputs.region }}
 
       # ── Log in Docker to ECR ──────────────────────────────────────────────────
