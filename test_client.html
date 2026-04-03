@@ -326,12 +326,12 @@
 
 <!-- ══ CORS WARNING (file:// origin) ════════════════════════════════════════ -->
 <div id="corsWarning">
-  <strong>⚠ CORS warning:</strong> This page is being served from <code>file://</code>.
-  Browsers send <code>Origin: null</code> for local files, which most servers block.
+  <strong>⚠ IMPORTANT — getUserMedia requires HTTP/HTTPS:</strong> This page is being served from <code>file://</code>.
+  <strong style="color:#fbbf24;">Audio recording will NOT work with file:// protocol.</strong>
   Serve this file over HTTP instead:<br>
   <code>python -m http.server 8080</code> &nbsp;→&nbsp; open
   <code>http://localhost:8080/test_client.html</code>
-  &nbsp;|&nbsp; Or add <code>CORS_ORIGINS=null</code> to your <code>.env</code> for local testing only.
+  <br>This ensures getUserMedia is available. CORS: Also add <code>CORS_ORIGINS=null</code> to your <code>.env</code> for local testing, or use your actual domain in production.
 </div>
 
 <!-- ══ TOP BAR ══════════════════════════════════════════════════════════════ -->
@@ -339,6 +339,8 @@
   <h1>🏥 Aura Health API</h1>
   <label>Base URL</label>
   <input id="baseUrl" type="text" value="http://localhost:8000" />
+  <label style="margin-left:20px;">API Key <span style="color:var(--red);">*</span></label>
+  <input id="apiKey" type="password" value="" placeholder="Enter your API key..." style="width:180px;" />
   <button class="btn btn-outline" onclick="checkHealth()" style="padding:6px 12px;font-size:12px;">
     Check Health
   </button>
@@ -464,6 +466,21 @@ Patient: I have had persistent chest tightness and shortness of breath on exerti
 
 function base() {
   return document.getElementById('baseUrl').value.replace(/\/+$/, '');
+}
+
+function getApiKey() {
+  return document.getElementById('apiKey').value.trim();
+}
+
+function getAuthHeaders() {
+  // Build Authorization header if API key is provided
+  // Health check doesn't require auth but will accept it
+  const key = getApiKey();
+  const headers = {};
+  if (key) {
+    headers['Authorization'] = 'Bearer ' + key;
+  }
+  return headers;
 }
 
 function genId() {
@@ -623,7 +640,10 @@ async function checkHealth() {
   badge.className = '';
   badge.textContent = '● Checking…';
   try {
-    const r = await fetch(base() + '/health');
+    const r = await fetch(base() + '/health', {
+      headers: getAuthHeaders(),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     const j = await r.json();
     badge.className = 'ok';
     badge.textContent = '● ' + j.status + ' · ' + (j.model || '?');
@@ -641,8 +661,20 @@ async function checkHealth() {
 
 async function loadSchema() {
   const out = document.getElementById('schemaOut');
+  const key = getApiKey();
+  if (!key) {
+    logInfo('⚠ API key required — enter your API key in the header.');
+    return;
+  }
   try {
-    const r = await fetch(base() + '/consult/schema');
+    const r = await fetch(base() + '/consult/schema', {
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      logInfo('Schema error ' + r.status + ': ' + (err.detail || ''));
+      return;
+    }
     const j = await r.json();
     out.style.display = 'block';
     out.textContent = JSON.stringify(j, null, 2);
@@ -666,7 +698,16 @@ async function loadSchema() {
 async function submitText() {
   const btn        = document.getElementById('submitTextBtn');
   const transcript = document.getElementById('transcript').value.trim();
-  if (!transcript) { logInfo('Transcript is empty.'); return; }
+  const key        = getApiKey();
+  
+  if (!key) {
+    logInfo('⚠ API key required — enter your API key in the header.');
+    return;
+  }
+  if (!transcript) {
+    logInfo('Transcript is empty.');
+    return;
+  }
 
   clearLog();
   const sessionId = genId();
@@ -679,7 +720,7 @@ async function submitText() {
     // 1. Submit consultation
     const res = await fetch(base() + '/consult', {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
       body:    JSON.stringify({
         session_id:      sessionId,
         transcript:      transcript,
@@ -694,25 +735,32 @@ async function submitText() {
     const payload = await res.json();
     logInfo('Queued — opening stream: ' + payload.stream_url);
 
-    // 2. Open SSE stream (GET — standard EventSource works here)
+    // 2. Open SSE stream with Authorization header via fetch (EventSource doesn't support custom headers)
     await new Promise((resolve) => {
-      const es = new EventSource(base() + payload.stream_url);
-      es.onmessage = (e) => {
-        logEvent(e.data);
-        if (e.data.startsWith('[SUMMARY] soap_note:')) {
-          renderSoap(e.data.slice('[SUMMARY] soap_note:'.length).trimStart());
-        }
-        if (e.data === '[DONE]' || e.data.startsWith('[ERROR]')) {
-          es.close();
+      (async () => {
+        try {
+          const streamRes = await fetch(base() + payload.stream_url, {
+            headers: getAuthHeaders(),
+          });
+          if (!streamRes.ok) {
+            logInfo('Stream error ' + streamRes.status);
+            resolve();
+            return;
+          }
+          await consumeStream(readSSE(streamRes));
           resolve();
           // 3. Fetch final state for governance badges
-          fetch(base() + '/session/' + sessionId)
+          fetch(base() + '/session/' + sessionId, {
+            headers: getAuthHeaders(),
+          })
             .then(r => r.json())
             .then(j => renderGovernance(j.final_state))
             .catch(() => {});
+        } catch (e) {
+          logInfo('Stream connection error: ' + e.message);
+          resolve();
         }
-      };
-      es.onerror = () => { logInfo('Stream connection error.'); es.close(); resolve(); };
+      })();
     });
 
   } finally {
@@ -797,10 +845,23 @@ function _startRecorderCycle() {
 }
 
 async function startRecording() {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    logInfo('getUserMedia not supported in this browser.');
+  const key = getApiKey();
+  if (!key) {
+    logInfo('⚠ API key required — enter your API key in the header.');
     return;
   }
+  
+  // Check for getUserMedia with detailed error reporting
+  if (!navigator.mediaDevices) {
+    logInfo('⚠ mediaDevices not available. This usually means: 1) Not served over HTTPS (use HTTPS in production, HTTP for localhost is OK), 2) Opened via file:// (serve via HTTP instead), or 3) Old browser.');
+    return;
+  }
+  
+  if (typeof navigator.mediaDevices.getUserMedia !== 'function') {
+    logInfo('⚠ getUserMedia not supported. Check: 1) HTTPS requirement, 2) Browser support, 3) Microphone permissions.');
+    return;
+  }
+  
   clearLog();
   audioSessionId = genId();
   chunkIndex     = 0;
@@ -813,7 +874,18 @@ async function startRecording() {
   try {
     audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e) {
-    logInfo('Microphone access denied: ' + e.message);
+    // Distinguish between different error types
+    let errorMsg = e.message;
+    if (e.name === 'NotAllowedError') {
+      errorMsg = 'Microphone permission denied by user or browser policy.';
+    } else if (e.name === 'NotFoundError' || e.name === 'DevicesNotFoundError') {
+      errorMsg = 'No microphone device found. Check hardware connectivity.';
+    } else if (e.name === 'NotSecureError') {
+      errorMsg = 'getUserMedia requires HTTPS (or localhost/127.0.0.1 for HTTP).';
+    } else if (e.name === 'TypeError') {
+      errorMsg = 'getUserMedia call failed. Check browser compatibility or URL protocol.';
+    }
+    logInfo('Microphone access error: ' + errorMsg);
     return;
   }
 
@@ -854,7 +926,7 @@ async function sendAudioChunk(blob, idx, isFinal) {
   try {
     const res = await fetch(url, {
       method:  'POST',
-      headers: { 'Content-Type': 'audio/webm' },
+      headers: { ...getAuthHeaders(), 'Content-Type': 'audio/webm' },
       body:    blob,
     });
     if (!res.ok) {
@@ -883,7 +955,7 @@ async function sendFinalAudioChunk(blob, idx) {
   try {
     const res = await fetch(url, {
       method:  'POST',
-      headers: { 'Content-Type': 'audio/webm' },
+      headers: { ...getAuthHeaders(), 'Content-Type': 'audio/webm' },
       body:    blob,
     });
     if (!res.ok) {
@@ -894,7 +966,9 @@ async function sendFinalAudioChunk(blob, idx) {
     // Response is text/event-stream — read with streaming fetch
     await consumeStream(readSSE(res));
     // Fetch final state for governance badges
-    fetch(base() + '/session/' + audioSessionId)
+    fetch(base() + '/session/' + audioSessionId, {
+      headers: getAuthHeaders(),
+    })
       .then(r => r.json())
       .then(j => renderGovernance(j.final_state))
       .catch(() => {});

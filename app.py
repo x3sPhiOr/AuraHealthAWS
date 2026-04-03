@@ -56,10 +56,29 @@ from presidio_anonymizer.entities import OperatorConfig
 # ── 6. FastAPI / SSE ──────────────────────────────────────────────────────────
 import io
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, Query
+from fastapi import FastAPI, HTTPException, Request, Query, Depends, Header, status
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 from pydantic import BaseModel, Field
+
+# ── 7. Authentication ──────────────────────────────────────────────────────────
+try:
+    from app_auth import verify_bearer_token
+    AUTH_AVAILABLE = True
+except ImportError as e:
+    AUTH_AVAILABLE = False
+    print(f"WARNING: app_auth import failed: {e}")
+    print("Using fallback authentication (request all fail with 403).")
+    
+    def verify_bearer_token(authorization: str = Header(None)) -> str:
+        """
+        Fallback if app_auth is not available.
+        Always rejects requests with 403 to ensure no accidental public access.
+        """
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="API authentication module not available.",
+        )
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION  (from environment / .env)
@@ -1098,7 +1117,7 @@ class ConsultRequest(BaseModel):
 
 
 @api.get("/consult/schema")
-def consult_schema():
+def consult_schema(token: str = Depends(verify_bearer_token)):
     return {
         "patient_context_schema": {
             "age":                 {"type": "integer", "label": "Age",                 "required": False, "default": DEFAULT_PATIENT_CONTEXT["age"],                 "example": 58},
@@ -1129,7 +1148,7 @@ def consult_schema():
 
 
 @api.post("/consult")
-async def consult(req: ConsultRequest):
+async def consult(req: ConsultRequest, token: str = Depends(verify_bearer_token)):
     effective_context = _normalize_api_patient_context(req.patient_context.model_dump())
     sessions_store[req.session_id] = {
         "chunks": [], "done": False, "started": False,
@@ -1190,7 +1209,7 @@ async def run_and_stream(session_id: str, transcript: str, patient_context: dict
 
 
 @api.get("/stream/{session_id}")
-async def stream(request: Request, session_id: str):
+async def stream(request: Request, session_id: str, token: str = Depends(verify_bearer_token)):
     if session_id not in sessions_store:
         raise HTTPException(status_code=404, detail="Unknown session_id")
 
@@ -1212,7 +1231,7 @@ async def stream(request: Request, session_id: str):
 
 
 @api.get("/session/{session_id}")
-def get_session(session_id: str):
+def get_session(session_id: str, token: str = Depends(verify_bearer_token)):
     return _session_payload(session_id)
 
 
@@ -1282,6 +1301,7 @@ async def consult_audio(
     chunk_index:     int  = Query(default=0,      description="0-based chunk sequence number."),
     is_final:        bool = Query(default=False,  description="Set true on the last chunk to trigger consultation."),
     patient_context: str  = Query(default="{}",   description="JSON-encoded PatientContext. Only required on the final chunk."),
+    token:           str  = Depends(verify_bearer_token),
 ):
     """
     Unified audio ingestion + consultation endpoint.

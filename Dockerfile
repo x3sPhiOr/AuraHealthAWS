@@ -39,6 +39,7 @@ RUN python -m spacy download en_core_web_lg
 # changes to app.py alone don't invalidate those (usually stable) layers.
 COPY governance/ governance/
 COPY data/       data/
+COPY app_auth.py .
 COPY app.py      .
 
 # Create writable output directories (audit logs, SOAP exports)

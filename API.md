@@ -8,6 +8,50 @@ The two consultation endpoints return `text/event-stream` (Server-Sent Events) w
 
 ---
 
+## Authentication
+
+All endpoints **except `/health`** require Bearer token authentication via the `Authorization` header.
+
+**Request format:**
+
+```
+Authorization: Bearer <your-api-key>
+```
+
+**Examples:**
+
+```bash
+# ✓ Valid request
+curl -H "Authorization: Bearer sk_live_abc123xyz" \
+  https://service.awsapprunner.com/consult/schema
+
+# ✗ Missing token → 401 Unauthorized
+curl https://service.awsapprunner.com/consult/schema
+
+# ✗ Invalid token → 401 Unauthorized
+curl -H "Authorization: Bearer invalid_token" \
+  https://service.awsapprunner.com/consult/schema
+```
+
+**Error responses:**
+
+| Status | Condition |
+|--------|-----------|
+| `401 Unauthorized` | Missing, invalid, or expired bearer token. |
+| `403 Forbidden` | API authentication is not configured on the server. |
+
+**API Key Management:**
+
+API keys are configured via the `API_KEYS` environment variable (comma-separated list). Set this in Secrets Manager or your .env file:
+
+```
+API_KEYS=sk_live_abc123xyz,sk_live_def456uvw,sk_live_ghi789rst
+```
+
+The `/health` endpoint is publicly accessible without authentication to support App Runner health checks and monitoring.
+
+---
+
 ## Table of Contents
 
 1. [Health Check](#1-health-check)
