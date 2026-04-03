@@ -353,8 +353,9 @@
 <header>
   <h1>🩺 Aura Health</h1>
   <input id="baseUrl" type="text" value="https://waz6fna5ax.us-east-1.awsapprunner.com" style="display:none;" />
-  <label style="margin-left:20px;">API Key <span style="color:var(--red);">*</span></label>
-  <input id="apiKey" type="password" value="" placeholder="Enter your API key..." style="width:180px;" />
+  <label style="margin-left:20px;">Token <span style="color:var(--red);">*</span></label>
+  <input id="apiKey" type="password" value="" placeholder="Enter your token..." style="width:180px;" />
+  <button onclick="checkHealth()" style="margin-left:6px;">Connect</button>
   <span id="sessionBadge" style="display:none;">No active session</span>
   <span id="healthBadge" style="margin-left:auto;">● Checking…</span>
 </header>
@@ -727,8 +728,8 @@ async function checkHealth() {
   badge.textContent = '● Checking…';
   if (!getApiKey()) {
     badge.className = 'error';
-    badge.textContent = '● Missing API Key';
-    logInfo('Error: API key is required. Enter your key in the header.');
+    badge.textContent = '● Missing Token';
+    logInfo('Error: Token is required. Enter your token in the header.');
     return;
   }
   try {
@@ -1051,6 +1052,7 @@ async function sendFinalAudioChunk(blob, idx) {
 
 })();
 
+document.getElementById('apiKey').addEventListener('keydown', e => { if (e.key === 'Enter') checkHealth(); });
 checkHealth();
 </script>
 </body>
