@@ -354,8 +354,7 @@
   <h1>🩺 Aura Health</h1>
   <input id="baseUrl" type="text" value="https://waz6fna5ax.us-east-1.awsapprunner.com" style="display:none;" />
   <label style="margin-left:20px;">Token <span style="color:var(--red);">*</span></label>
-  <input id="apiKey" type="password" value="" placeholder="Enter your token..." style="width:180px;" />
-  <button onclick="checkHealth()" style="margin-left:6px;">Connect</button>
+  <input id="apiKey" type="password" value="" placeholder="Input token for connection" style="width:250px;" />
   <span id="sessionBadge" style="display:none;">No active session</span>
   <span id="healthBadge" style="margin-left:auto;">● Checking…</span>
 </header>
@@ -726,12 +725,6 @@ async function checkHealth() {
   const badge = document.getElementById('healthBadge');
   badge.className = '';
   badge.textContent = '● Checking…';
-  if (!getApiKey()) {
-    badge.className = 'error';
-    badge.textContent = '● Missing Token';
-    logInfo('Error: Token is required. Enter your token in the header.');
-    return;
-  }
   try {
     const r = await fetch(base() + '/health', {
       headers: getAuthHeaders(),
@@ -1052,7 +1045,6 @@ async function sendFinalAudioChunk(blob, idx) {
 
 })();
 
-document.getElementById('apiKey').addEventListener('keydown', e => { if (e.key === 'Enter') checkHealth(); });
 checkHealth();
 </script>
 </body>
