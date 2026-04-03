@@ -112,3 +112,54 @@ def verify_bearer_token(authorization: str = Header(None)) -> str:
         )
 
     return token
+
+
+def verify_bearer_token_or_query(authorization: str = Header(None), token: str = None) -> str:
+    """
+    FastAPI dependency for SSE/EventSource endpoints.
+    
+    Accepts authentication from EITHER:
+    1. Authorization header: Bearer <token> (standard)
+    2. Query parameter: ?token=<token> (for EventSource which doesn't support custom headers)
+    
+    Returns the valid token.
+    Raises HTTPException with 401/403 if token is invalid or missing.
+    
+    Usage:
+        @api.get("/stream/{session_id}")
+        async def stream(session_id: str, auth: str = Depends(verify_bearer_token_or_query)):
+            # auth is the validated bearer token
+    """
+    
+    # Check if API authentication is configured
+    if not VALID_API_KEYS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="API authentication is not configured on the server.",
+        )
+    
+    # Try header first (standard approach)
+    if authorization:
+        try:
+            scheme, bearer_token = authorization.split(" ", 1)
+            if scheme.lower() == "bearer" and bearer_token in VALID_API_KEYS:
+                return bearer_token
+        except ValueError:
+            pass  # Fall through to query param check
+    
+    # Fall back to query parameter (for EventSource)
+    if token:
+        if token in VALID_API_KEYS:
+            return token
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired bearer token.",
+            )
+    
+    # No auth found
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Missing Authorization header or 'token' query parameter. Use: Authorization: Bearer <token> or ?token=<token>",
+        headers={"WWW-Authenticate": "Bearer"},
+    )

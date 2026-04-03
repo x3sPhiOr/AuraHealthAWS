@@ -639,6 +639,12 @@ async function checkHealth() {
   const badge = document.getElementById('healthBadge');
   badge.className = '';
   badge.textContent = '● Checking…';
+  if (!getApiKey()) {
+    badge.className = 'error';
+    badge.textContent = '● Missing API Key';
+    logInfo('⚠ API key required — enter your API key in the header.');
+    return;
+  }
   try {
     const r = await fetch(base() + '/health', {
       headers: getAuthHeaders(),

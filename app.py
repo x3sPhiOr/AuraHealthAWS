@@ -64,7 +64,7 @@ from pydantic import BaseModel, Field
 
 # ── 7. Authentication ──────────────────────────────────────────────────────────
 try:
-    from app_auth import verify_bearer_token
+    from app_auth import verify_bearer_token, verify_bearer_token_or_query
     AUTH_AVAILABLE = True
 except ImportError as e:
     AUTH_AVAILABLE = False
@@ -74,6 +74,16 @@ except ImportError as e:
     def verify_bearer_token(authorization: str = Header(None)) -> str:
         """
         Fallback if app_auth is not available.
+        Always rejects requests with 403 to ensure no accidental public access.
+        """
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="API authentication module not available.",
+        )
+    
+    def verify_bearer_token_or_query(authorization: str = Header(None), token: str = None) -> str:
+        """
+        Fallback if app_auth is not available (SSE/query param version).
         Always rejects requests with 403 to ensure no accidental public access.
         """
         raise HTTPException(
@@ -1229,7 +1239,7 @@ async def run_and_stream(session_id: str, transcript: str, patient_context: dict
 
 
 @api.get("/stream/{session_id}")
-async def stream(request: Request, session_id: str, token: str = Depends(verify_bearer_token)):
+async def stream(request: Request, session_id: str, token: str = Depends(verify_bearer_token_or_query)):
     if session_id not in sessions_store:
         raise HTTPException(status_code=404, detail="Unknown session_id")
 
