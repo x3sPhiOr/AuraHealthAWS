@@ -721,6 +721,12 @@ async function checkHealth() {
   const badge = document.getElementById('healthBadge');
   badge.className = '';
   badge.textContent = '● Checking…';
+  if (!getApiKey()) {
+    badge.className = 'error';
+    badge.textContent = '● Missing API Key';
+    logInfo('Error: API key is required. Enter your key in the header.');
+    return;
+  }
   try {
     const r = await fetch(base() + '/health', {
       headers: getAuthHeaders(),
@@ -742,6 +748,12 @@ async function checkHealth() {
 
 async function loadSchema() {
   const out = document.getElementById('schemaOut');
+  if (!getApiKey()) {
+    out.style.display = 'block';
+    out.textContent = 'Error: API key is required. Enter your key in the header.';
+    logInfo('Error: API key is required.');
+    return;
+  }
   try {
     const r = await fetch(base() + '/consult/schema', {
       headers: getAuthHeaders(),
@@ -770,6 +782,7 @@ async function submitText() {
   const btn        = document.getElementById('submitTextBtn');
   const transcript = document.getElementById('transcript').value.trim();
   if (!transcript) { logInfo('Transcript is empty.'); return; }
+  if (!getApiKey()) { logInfo('Error: API key is required. Enter your key in the header.'); return; }
 
   clearLog();
   const sessionId = genId();
@@ -797,28 +810,26 @@ async function submitText() {
     const payload = await res.json();
     logInfo('Queued — opening stream: ' + payload.stream_url);
 
-    // 2. Open SSE stream (GET — standard EventSource works here)
-    await new Promise((resolve) => {
-      const es = new EventSource(base() + payload.stream_url);
-      es.onmessage = (e) => {
-        logEvent(e.data);
-        if (e.data.startsWith('[SUMMARY] soap_note:')) {
-          renderSoap(e.data.slice('[SUMMARY] soap_note:'.length).trimStart());
-        }
-        if (e.data === '[DONE]' || e.data.startsWith('[ERROR]')) {
-          es.close();
-          resolve();
-          // 3. Fetch final state for governance badges
-          fetch(base() + '/session/' + sessionId, {
-            headers: getAuthHeaders(),
-          })
-            .then(r => r.json())
-            .then(j => renderGovernance(j.final_state))
-            .catch(() => {});
-        }
-      };
-      es.onerror = () => { logInfo('Stream connection error.'); es.close(); resolve(); };
-    });
+    // 2. Open SSE stream (using fetch-based reader to support Authorization header)
+    try {
+      const streamRes = await fetch(base() + payload.stream_url, {
+        headers: getAuthHeaders(),
+      });
+      if (!streamRes.ok) {
+        logInfo('Stream error ' + streamRes.status);
+        return;
+      }
+      await consumeStream(readSSE(streamRes));
+      // 3. Fetch final state for governance badges
+      fetch(base() + '/session/' + sessionId, {
+        headers: getAuthHeaders(),
+      })
+        .then(r => r.json())
+        .then(j => renderGovernance(j.final_state))
+        .catch(() => {});
+    } catch (e) {
+      logInfo('Stream connection error: ' + e.message);
+    }
 
   } finally {
     btn.disabled = false;
@@ -904,6 +915,10 @@ function _startRecorderCycle() {
 async function startRecording() {
   if (!navigator.mediaDevices?.getUserMedia) {
     logInfo('getUserMedia not supported in this browser.');
+    return;
+  }
+  if (!getApiKey()) {
+    logInfo('Error: API key is required. Enter your key in the header.');
     return;
   }
   clearLog();

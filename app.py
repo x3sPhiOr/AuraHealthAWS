@@ -64,7 +64,7 @@ from pydantic import BaseModel, Field
 
 # ── 7. Authentication ──────────────────────────────────────────────────────────
 try:
-    from app_auth import verify_bearer_token
+    from app_auth import verify_bearer_token, verify_bearer_token_or_query
     AUTH_AVAILABLE = True
 except ImportError as e:
     AUTH_AVAILABLE = False
@@ -74,6 +74,16 @@ except ImportError as e:
     def verify_bearer_token(authorization: str = Header(None)) -> str:
         """
         Fallback if app_auth is not available.
+        Always rejects requests with 403 to ensure no accidental public access.
+        """
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="API authentication module not available.",
+        )
+    
+    def verify_bearer_token_or_query(authorization: str = Header(None), token: str = None) -> str:
+        """
+        Fallback if app_auth is not available (SSE/query param version).
         Always rejects requests with 403 to ensure no accidental public access.
         """
         raise HTTPException(
