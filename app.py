@@ -1239,7 +1239,7 @@ async def run_and_stream(session_id: str, transcript: str, patient_context: dict
 
 
 @api.get("/stream/{session_id}")
-async def stream(request: Request, session_id: str, token: str = Depends(verify_bearer_token)):
+async def stream(request: Request, session_id: str, token: str = Depends(verify_bearer_token_or_query)):
     if session_id not in sessions_store:
         raise HTTPException(status_code=404, detail="Unknown session_id")
 

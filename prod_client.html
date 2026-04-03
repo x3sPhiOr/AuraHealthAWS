@@ -810,13 +810,22 @@ async function submitText() {
     const payload = await res.json();
     logInfo('Queued — opening stream: ' + payload.stream_url);
 
-    // 2. Open SSE stream (using fetch-based reader to support Authorization header)
+    // 2. Open SSE stream (using fetch-based reader to support Authorization header + query param fallback for CloudFront)
     try {
-      const streamRes = await fetch(base() + payload.stream_url, {
-        headers: getAuthHeaders(),
+      const authHeaders = getAuthHeaders();
+      const apiKey = getApiKey();
+      logInfo('DEBUG: Auth headers: ' + JSON.stringify(authHeaders));
+      let streamUrl = base() + payload.stream_url;
+      if (apiKey) {
+        streamUrl += (streamUrl.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(apiKey);
+      }
+      logInfo('DEBUG: Stream URL: ' + streamUrl);
+      const streamRes = await fetch(streamUrl, {
+        headers: authHeaders,
       });
       if (!streamRes.ok) {
-        logInfo('Stream error ' + streamRes.status);
+        const errText = await streamRes.text();
+        logInfo('Stream error ' + streamRes.status + ': ' + errText);
         return;
       }
       await consumeStream(readSSE(streamRes));
