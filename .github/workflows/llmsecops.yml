@@ -319,3 +319,13 @@ jobs:
     steps:
       - name: All required gates passed
         run: echo "All LLMSecOps + IMDA AI Governance gates passed — merge allowed"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Deploy — triggers immediately after security-gate, no need to wait for Gate 6
+# ──────────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: "Deploy — ECR + App Runner"
+    needs: [security-gate]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy.yml
+    secrets: inherit

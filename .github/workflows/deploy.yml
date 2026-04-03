@@ -1,13 +1,9 @@
 name: "Aura Health — Deploy to Amazon ECR + App Runner"
 
 on:
-  # Auto-trigger only after the full LLMSecOps pipeline passes on main.
-  # This guarantees no image is pushed to ECR unless all security/governance
-  # gates have been cleared first.
-  workflow_run:
-    workflows: ["Aura Health — LLMSecOps + AI Governance Pipeline"]
-    types: [completed]
-    branches: [main]
+  # Called directly from llmsecops.yml after the security-gate job passes.
+  # This fires as soon as Gates 1-5 clear, without waiting for Gate 6 (promptfoo).
+  workflow_call:
 
   # Allow a manual re-deploy (e.g. config-only change, rollback) without
   # re-running all CI gates.
@@ -33,12 +29,6 @@ jobs:
   deploy:
     name: "Build → ECR push → App Runner deploy"
     runs-on: ubuntu-latest
-
-    # For workflow_run events:  only proceed if the CI pipeline succeeded.
-    # For workflow_dispatch:    always run (the engineer is explicitly requesting it).
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
 
     permissions:
       contents: read
