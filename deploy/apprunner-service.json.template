@@ -8,13 +8,17 @@
       "ImageConfiguration": {
         "Port": "8000",
         "RuntimeEnvironmentVariables": {
-          "AWS_DEFAULT_REGION":  "<REGION>",
-          "BEDROCK_MODEL":       "anthropic.claude-haiku-4-5-20251001-v1:0",
-          "BEDROCK_PROVIDER":    "anthropic",
-          "KB_USE_SEED":         "true",
-          "KB_ENABLE_CDC":       "false",
-          "KB_ENABLE_PUBMED":    "false",
-          "KB_ENABLE_OPENFDA":   "false"
+          "AWS_DEFAULT_REGION":         "<REGION>",
+          "BEDROCK_MODEL":              "anthropic.claude-haiku-4-5-20251001-v1:0",
+          "BEDROCK_PROVIDER":           "anthropic",
+          "KB_USE_SEED":                "true",
+          "KB_ENABLE_CDC":              "false",
+          "KB_ENABLE_PUBMED":           "false",
+          "KB_ENABLE_OPENFDA":          "false",
+          "ENABLE_S3_ARTIFACT_UPLOADS": "true",
+          "AURA_OUTPUTS_BUCKET":        "aurahealth-aura-outputs",
+          "AURA_AUDIT_BUCKET":          "aurahealth-audit-logs",
+          "AURA_S3_PREFIX":             "sessions"
         }
       }
     },

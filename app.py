@@ -150,6 +150,13 @@ STT_OPENAI_FALLBACK_MODELS = [
 ]
 STT_LANGUAGE = os.getenv("STT_LANGUAGE", "en")
 
+LOCAL_OUTPUT_DIR           = os.getenv("AURA_OUTPUT_DIR", "aura_outputs")
+LOCAL_AUDIT_DIR            = os.getenv("AURA_AUDIT_DIR", "audit_logs")
+ENABLE_S3_ARTIFACT_UPLOADS = os.getenv("ENABLE_S3_ARTIFACT_UPLOADS", "true").lower() == "true"
+AURA_OUTPUTS_BUCKET        = os.getenv("AURA_OUTPUTS_BUCKET", "aurahealth-aura-outputs").strip()
+AURA_AUDIT_BUCKET          = os.getenv("AURA_AUDIT_BUCKET", "aurahealth-audit-logs").strip()
+AURA_S3_PREFIX             = os.getenv("AURA_S3_PREFIX", "sessions").strip().strip("/")
+
 DEFAULT_PATIENT_CONTEXT = {
     "age": 58,
     "gender": "male",
@@ -163,6 +170,8 @@ print(f"  Region   : {AWS_REGION}")
 print(f"  Model    : {BEDROCK_MODEL}")
 print(f"  Profile  : {BEDROCK_INFERENCE_PROFILE_ID or '(not set)'}")
 print(f"  Provider : {BEDROCK_PROVIDER}")
+print(f"  Outputs  : {LOCAL_OUTPUT_DIR} → {AURA_OUTPUTS_BUCKET or '(S3 disabled)'}")
+print(f"  Audit    : {LOCAL_AUDIT_DIR} → {AURA_AUDIT_BUCKET or '(S3 disabled)'}")
 print(f"  Time     : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -840,6 +849,183 @@ def log(node: str, msg: str):
     print(f"  [{node.upper()}] {msg}")
 
 
+def _safe_session_fragment(session_id: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", (session_id or "").strip())
+    return cleaned.strip("-") or "unknown-session"
+
+
+def _resolve_artifact_dir(path_value: str) -> Path:
+    base = Path(path_value)
+    return base if base.is_absolute() else Path(PROJECT_ROOT) / base
+
+
+def _build_governance_report(state: dict) -> str:
+    fairness_issues = state.get("fairness_issues", []) or []
+    xai_record = state.get("xai_record", {}) or {}
+    ai_verify_runtime = state.get("ai_verify_runtime", {}) or {}
+
+    lines = [
+        f"Session ID: {state.get('session_id', 'unknown')}",
+        f"Generated UTC: {datetime.utcnow().isoformat()}Z",
+        "",
+        "## Governance Summary",
+        f"- Oversight level: {state.get('oversight_level', 'unknown')}",
+        f"- Human review required: {state.get('human_review_required', False)}",
+        f"- Escalation required: {state.get('escalation_required', False)}",
+        f"- Fairness passed: {state.get('fairness_passed', False)}",
+        f"- Fairness issues count: {len(fairness_issues)}",
+        f"- Output blocked: {state.get('output_blocked', False)}",
+        f"- Block reason: {state.get('block_reason') or 'None'}",
+        f"- MOH compliant: {state.get('moh_compliant', False)}",
+        f"- SaMD class: {state.get('samd_class', 'unknown')}",
+        "",
+        "## AI Verify Runtime",
+        json.dumps(ai_verify_runtime, indent=2, ensure_ascii=False) if ai_verify_runtime else "{}",
+        "",
+        "## XAI Record",
+        json.dumps(xai_record, indent=2, ensure_ascii=False) if xai_record else "{}",
+    ]
+
+    if fairness_issues:
+        lines.extend([
+            "",
+            "## Fairness Issues",
+            json.dumps(fairness_issues, indent=2, ensure_ascii=False),
+        ])
+
+    return "\n".join(lines) + "\n"
+
+
+def export_consultation(state: dict, session_id: str, output_dir: str = LOCAL_OUTPUT_DIR) -> dict:
+    output_root = _resolve_artifact_dir(output_dir)
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    safe_session_id = _safe_session_fragment(session_id)
+    record_path = output_root / f"{safe_session_id}_record.json"
+    transcript_path = output_root / f"{safe_session_id}_scrubbed_transcript.txt"
+    soap_path = output_root / f"{safe_session_id}_soap.txt"
+    governance_path = output_root / f"{safe_session_id}_governance.txt"
+
+    record = {
+        "session_id": session_id,
+        "generated_at_utc": datetime.utcnow().isoformat() + "Z",
+        "scrubbed_transcript": state.get("scrubbed_transcript", "") or "",
+        "soap_note": state.get("soap_note", "") or "",
+        "agents_needed": state.get("agents_needed", []) or [],
+        "pii_detected": state.get("pii_detected", []) or [],
+        "xai_record": state.get("xai_record", {}) or {},
+        "oversight_level": state.get("oversight_level"),
+        "human_review_required": state.get("human_review_required"),
+        "escalation_required": state.get("escalation_required"),
+        "fairness_passed": state.get("fairness_passed"),
+        "fairness_issues": state.get("fairness_issues", []) or [],
+        "output_blocked": state.get("output_blocked"),
+        "block_reason": state.get("block_reason"),
+        "moh_compliant": state.get("moh_compliant"),
+        "samd_class": state.get("samd_class"),
+        "ai_verify_runtime": state.get("ai_verify_runtime", {}) or {},
+        "audit_log_path": state.get("audit_log_path"),
+    }
+
+    record_path.write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
+    transcript_path.write_text((state.get("scrubbed_transcript", "") or "") + "\n", encoding="utf-8")
+    soap_path.write_text((state.get("soap_note", "") or "") + "\n", encoding="utf-8")
+    governance_path.write_text(_build_governance_report({**state, "session_id": session_id}), encoding="utf-8")
+
+    return {
+        "record_json": str(record_path),
+        "scrubbed_transcript": str(transcript_path),
+        "soap_note": str(soap_path),
+        "governance_report": str(governance_path),
+    }
+
+
+def _upload_file_to_s3(local_path: str, bucket: str, object_key: str, s3_client=None) -> Optional[str]:
+    path = Path(local_path)
+    if not ENABLE_S3_ARTIFACT_UPLOADS or not bucket or not path.exists():
+        return None
+
+    key = object_key.strip("/")
+    extra_args = None
+    if path.suffix == ".json":
+        extra_args = {"ContentType": "application/json"}
+    elif path.suffix == ".jsonl":
+        extra_args = {"ContentType": "application/x-ndjson"}
+    elif path.suffix == ".txt":
+        extra_args = {"ContentType": "text/plain; charset=utf-8"}
+
+    try:
+        client = s3_client or boto3.client("s3", region_name=AWS_REGION)
+        if extra_args:
+            client.upload_file(str(path), bucket, key, ExtraArgs=extra_args)
+        else:
+            client.upload_file(str(path), bucket, key)
+        uri = f"s3://{bucket}/{key}"
+        log("s3", f"Uploaded {path.name} → {uri}")
+        return uri
+    except Exception as exc:
+        log("s3", f"Upload skipped for {path.name}: {exc}")
+        return None
+
+
+def persist_session_artifacts(state: dict, session_id: str) -> dict:
+    local_paths = export_consultation(state, session_id, output_dir=LOCAL_OUTPUT_DIR)
+
+    audit_log_path = state.get("audit_log_path")
+    if audit_log_path:
+        audit_path = Path(audit_log_path)
+        if not audit_path.is_absolute():
+            audit_path = Path(PROJECT_ROOT) / audit_path
+        local_paths["audit_json"] = str(audit_path)
+
+    audit_journal_path = _resolve_artifact_dir(LOCAL_AUDIT_DIR) / "aura_audit.jsonl"
+    if audit_journal_path.exists():
+        local_paths["audit_journal"] = str(audit_journal_path)
+
+    s3_uris = {}
+    if not ENABLE_S3_ARTIFACT_UPLOADS:
+        return {"local_paths": local_paths, "s3_uris": s3_uris}
+
+    try:
+        s3_client = boto3.client("s3", region_name=AWS_REGION)
+    except Exception as exc:
+        log("s3", f"S3 client unavailable: {exc}")
+        return {"local_paths": local_paths, "s3_uris": s3_uris}
+
+    safe_session_id = _safe_session_fragment(session_id)
+    session_prefix = f"{AURA_S3_PREFIX}/{safe_session_id}" if AURA_S3_PREFIX else safe_session_id
+
+    if AURA_OUTPUTS_BUCKET:
+        for label in ("record_json", "scrubbed_transcript", "soap_note", "governance_report"):
+            local_path = local_paths.get(label)
+            if local_path:
+                s3_uris[label] = _upload_file_to_s3(
+                    local_path,
+                    AURA_OUTPUTS_BUCKET,
+                    f"{session_prefix}/{Path(local_path).name}",
+                    s3_client=s3_client,
+                )
+
+    if AURA_AUDIT_BUCKET and local_paths.get("audit_json"):
+        audit_path = local_paths["audit_json"]
+        s3_uris["audit_json"] = _upload_file_to_s3(
+            audit_path,
+            AURA_AUDIT_BUCKET,
+            f"{session_prefix}/{Path(audit_path).name}",
+            s3_client=s3_client,
+        )
+
+    if AURA_AUDIT_BUCKET and audit_journal_path.exists():
+        s3_uris["audit_journal"] = _upload_file_to_s3(
+            str(audit_journal_path),
+            AURA_AUDIT_BUCKET,
+            f"{LOCAL_AUDIT_DIR}/aura_audit.jsonl",
+            s3_client=s3_client,
+        )
+
+    return {"local_paths": local_paths, "s3_uris": s3_uris}
+
+
 def stt_prep_node(state: AuraState) -> dict:
     source      = state.get("transcript_source", "manual")
     stt_enabled = bool(state.get("stt_enabled", False))
@@ -1216,6 +1402,14 @@ async def run_and_stream(session_id: str, transcript: str, patient_context: dict
 
         snapshot = graph.get_state(cfg)
         values   = snapshot.values if snapshot else {}
+        artifact_summary = persist_session_artifacts(values, session_id)
+
+        for label, path in artifact_summary.get("local_paths", {}).items():
+            sessions_store[session_id]["chunks"].append(f"[EXPORT] {label}: {path}")
+        for label, uri in artifact_summary.get("s3_uris", {}).items():
+            if uri:
+                sessions_store[session_id]["chunks"].append(f"[S3] {label}: {uri}")
+
         sessions_store[session_id]["final_state"] = {
             "soap_note":             values.get("soap_note"),
             "agents_needed":         values.get("agents_needed", []),
@@ -1231,6 +1425,10 @@ async def run_and_stream(session_id: str, transcript: str, patient_context: dict
             "moh_compliant":         values.get("moh_compliant"),
             "samd_class":            values.get("samd_class"),
             "audit_log_path":        values.get("audit_log_path"),
+            "output_artifacts":      artifact_summary.get("local_paths", {}),
+            "s3_artifacts":          artifact_summary.get("s3_uris", {}),
+            "audit_log_s3_uri":      artifact_summary.get("s3_uris", {}).get("audit_json"),
+            "audit_journal_s3_uri":  artifact_summary.get("s3_uris", {}).get("audit_journal"),
         }
     except Exception as exc:
         sessions_store[session_id]["error"] = f"{type(exc).__name__}: {exc}"
@@ -1267,7 +1465,14 @@ def get_session(session_id: str, token: str = Depends(verify_bearer_token)):
 
 @api.get("/health")
 def health():
-    return {"status": "ok", "model": BEDROCK_MODEL, "governance": GOVERNANCE_ENABLED}
+    return {
+        "status": "ok",
+        "model": BEDROCK_MODEL,
+        "governance": GOVERNANCE_ENABLED,
+        "s3_uploads_enabled": ENABLE_S3_ARTIFACT_UPLOADS,
+        "outputs_bucket": AURA_OUTPUTS_BUCKET or None,
+        "audit_bucket": AURA_AUDIT_BUCKET or None,
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
