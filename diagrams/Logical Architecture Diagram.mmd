@@ -1,55 +1,88 @@
 graph TB
-    subgraph ExternalUsers["External Users"]
-        U["Users / Clients"]
+    subgraph Users["End Users"]
+        U["Patient / Clinician"]
     end
 
-    subgraph S3Storage["S3 Buckets"]
-        FE_S3["Frontend S3 Bucket<br/>(Static Web Hosting)"]
-        ART_S3["Artifacts S3 Bucket<br/>(CloudFormation Logs & Aura Outputs)"]
+    subgraph FrontendDelivery["Frontend Access Layer"]
+        FE["Static Web Client<br/>(prod_client.html / test_client.html)"]
+        AUTH["Bearer Token Authentication"]
     end
 
-    subgraph AWSAppRunnerService["AWS App Runner Service"]
-        AR["AuraHealth App Runner Service<br/>waz6fna5ax.us-east-1.awsapprunner.com"]
+    subgraph AWSRuntime["Aura Health Runtime on AWS App Runner"]
+        API["FastAPI API Layer<br/>(/health, /consult, /stream, /session)"]
+        LG["LangGraph Orchestrator"]
 
-        subgraph ApplicationLayer["Application Layer"]
-            APP["Application Code"]
-            HC["Health Check Endpoint"]
+        subgraph ClinicalPipeline["Clinical Multi-Agent Pipeline"]
+            STT["STT Prep / Intake<br/>(transcript normalisation + PII scrubbing)"]
+            SUP["Supervisor Router"]
+            CLIN["Clinical Agent"]
+            DRUG["Drug Agent"]
+            RES["Research Agent"]
+            SUM["SOAP Summary"]
         end
 
-        subgraph AutoScaling["Auto Scaling"]
-            AS["Auto Scaling Engine"]
-            INST["Container Instances"]
+        subgraph GovernancePipeline["IMDA Governance Pipeline"]
+            XAI["Explainability (XAI)"]
+            FAIR["Fairness / PDPA Checks"]
+            HUM["Human Oversight"]
+            SAFE["Clinical Safety Guard"]
+            AUD["Audit Logging"]
         end
     end
 
-    subgraph SourceRepository["Source Repository"]
-        SRC["Source Code Repository<br/>(GitHub / ECR / etc.)"]
+    subgraph ModelIntegrations["External LLM & Knowledge Integrations"]
+        BR["AWS Bedrock<br/>(Anthropic Claude Haiku)"]
+        HF["Hugging Face Inference<br/>(Med42 fallback)"]
+        WHISPER["Optional OpenAI Whisper STT"]
+        KB["Medical Knowledge Sources<br/>(CDC / PubMed / openFDA)"]
     end
 
-    subgraph MonitoringLogging["Monitoring & Logging"]
-        CW["CloudWatch Logs"]
-        CWM["CloudWatch Metrics"]
-        XR["X-Ray Tracing"]
+    subgraph Storage["S3 Storage"]
+        FE_S3["Frontend S3 Bucket<br/>(static site hosting)"]
+        OUT_S3["Outputs S3 Bucket<br/>(SOAP, transcript, record)"]
+        AUD_S3["Audit S3 Bucket<br/>(audit JSON / journal)"]
     end
 
-    subgraph PotentialIntegrations["Potential Integrations"]
-        DB[("Database Services")]
-        API["External APIs"]
-        SES["Email Services"]
+    subgraph DevOps["DevOps / CI-CD"]
+        GH["GitHub Repository"]
+        GA["GitHub Actions<br/>(LLMSecOps + deploy workflow)"]
+        ECR["Amazon ECR"]
+        CW["CloudWatch Logs / Metrics"]
     end
 
-    U --> FE_S3
-    FE_S3 -->|API calls| AR
-    U --> AR
-    SRC --> AR
-    AR --> APP
-    APP --> HC
-    AS --> INST
-    AR --> CW
-    AR --> CWM
-    AR --> XR
-    CW --> ART_S3
-    APP --> ART_S3
-    APP --> DB
-    APP --> API
-    APP --> SES
+    U --> FE
+    FE -->|served from| FE_S3
+    FE --> AUTH
+    AUTH --> API
+
+    API --> LG
+    LG --> STT
+    STT --> SUP
+    SUP --> CLIN
+    SUP --> DRUG
+    SUP --> RES
+    CLIN --> SUM
+    DRUG --> SUM
+    RES --> SUM
+
+    SUM --> XAI
+    XAI --> FAIR
+    FAIR --> HUM
+    HUM --> SAFE
+    SAFE --> AUD
+
+    CLIN -. primary inference .-> BR
+    CLIN -. fallback medical model .-> HF
+    STT -. optional speech-to-text .-> WHISPER
+    CLIN -. evidence retrieval .-> KB
+    RES -. literature / guideline lookup .-> KB
+    DRUG -. medication safety lookup .-> KB
+
+    SUM --> OUT_S3
+    AUD --> AUD_S3
+    API --> CW
+
+    GH --> GA
+    GA -->|build & push container| ECR
+    ECR -->|deploy image| API
+    GA -. upload static HTML clients .-> FE_S3

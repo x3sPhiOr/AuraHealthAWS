@@ -1,0 +1,59 @@
+flowchart LR
+    %% Presentation-friendly logical architecture for Aura Health
+
+    U["Patient / Clinician"]
+
+    subgraph Channel["Access Channel"]
+        FE["Web Frontend"]
+        FE_S3["Amazon S3 Frontend Bucket<br/>(static client hosting)"]
+        AUTH["Bearer Token Authentication"]
+        FE_S3 --> FE
+        FE --> AUTH
+    end
+
+    subgraph Runtime["Aura Health Application Runtime"]
+        API["FastAPI Service<br/>AWS App Runner"]
+        STT["STT / Intake / PII Scrubbing"]
+        ORCH["LangGraph Supervisor"]
+        AGENTS["Clinical + Drug + Research Agents"]
+        GOV["Governance Controls<br/>XAI • Fairness • Human Oversight • Clinical Safety • Audit"]
+        OUT["Consultation Summary / SOAP Output"]
+
+        API --> STT --> ORCH --> AGENTS --> GOV --> OUT
+    end
+
+    subgraph Integrations["External AI & Knowledge Integrations"]
+        BR["Amazon Bedrock<br/>Claude Haiku"]
+        HF["Hugging Face Inference<br/>Med42 fallback"]
+        KB["CDC / PubMed / openFDA"]
+        WH["OpenAI GPT-4o-mini-transcribe"]
+    end
+
+    subgraph StorageObs["Storage & Monitoring"]
+        OUT_S3["S3 Outputs Bucket"]
+        AUD_S3["S3 Audit Bucket"]
+        CW["CloudWatch Logs / Metrics"]
+    end
+
+    subgraph DevOps["CI/CD & Deployment"]
+        GH["GitHub Repository"]
+        GA["GitHub Actions"]
+        ECR["Amazon ECR"]
+    end
+
+    U --> FE
+    AUTH --> API
+
+    AGENTS -. primary LLM .-> BR
+    AGENTS -. medical fallback .-> HF
+    AGENTS -. evidence retrieval .-> KB
+    STT -. speech-to-text .-> WH
+
+    OUT --> OUT_S3
+    GOV --> AUD_S3
+    API --> CW
+
+    GH --> GA
+    GA -->|upload static HTML| FE_S3
+    GA -->|build & push container| ECR
+    ECR -->|deploy image| API
