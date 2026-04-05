@@ -111,8 +111,8 @@
 
     /* ── Section labels ── */
     .section-label {
-      font-size: 11px;
-      font-weight: 600;
+      font-size: 20px;
+      font-weight: bold;
       letter-spacing: .08em;
       text-transform: uppercase;
       color: var(--muted);
@@ -166,6 +166,8 @@
     .btn-danger:hover { background: #fecaca; }
     .btn-green   { background: #dcfce7; color: var(--green); border: 1px solid #86efac; }
     .btn-green:hover { background: #bbf7d0; }
+    .btn-blue   { background: #90d5ff; color: var(--green); border: 1px solid #217ab2;; }
+    .btn-blue:hover { background: #90d5ff; }
 
     .btn-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 
@@ -370,7 +372,7 @@
         <label>Patient MRN</label>
         <input id="pc-mrn" type="text" placeholder="e.g. MRN-001" onkeydown="if(event.key==='Enter')lookupMRN()" />
       </div>
-      <button class="btn btn-outline" onclick="lookupMRN()" style="padding:6px 12px; font-size:12px; flex-shrink:0;">Search</button>
+      <button class="btn btn-blue" onclick="lookupMRN()" >Search</button>
     </div>
     <div id="mrn-status" style="padding: 0 16px 8px; font-size: 11px; min-height: 16px;"></div>
     <div class="patient-form">
@@ -426,7 +428,7 @@ Patient: I have had persistent chest tightness and shortness of breath on exerti
 
       <div class="btn-row">
         <button class="btn btn-primary" id="submitTextBtn" onclick="submitText()">
-          POST /consult → stream
+          Submit
         </button>
         <button class="btn btn-outline" onclick="clearLog()">Clear log</button>
       </div>
