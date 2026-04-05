@@ -1,0 +1,45 @@
+flowchart TD
+    START([START]) --> stt_prep["STT prep<br/>Transcript normalisation"]
+    stt_prep --> intake["Intake agent<br/>PII scrub + patient context"]
+    intake --> supervisor["Supervisor router<br/>Conditional agent dispatch"]
+
+    supervisor --> clinical["Clinical agent<br/>Guideline / CDC RAG"]
+    supervisor --> drug["Drug agent<br/>Medication safety review"]
+    supervisor --> research["Research agent<br/>PubMed evidence retrieval"]
+
+    clinical --> summary["Summary agent<br/>Synthesis + SOAP note"]
+    drug --> summary
+    research --> summary
+
+    summary --> output["Output node<br/>API / dashboard response"]
+    output --> END([END])
+
+    subgraph TOOLS["LangChain tools / retrievers / model"]
+        faiss["FAISS guideline retriever"]
+        fda["FDA / drug context retriever"]
+        pubmed["PubMed evidence retriever"]
+        presidio["Presidio PII scrubber"]
+        bedrock["AWS Bedrock Claude"]
+    end
+
+    intake -. uses .-> presidio
+    supervisor -. routes with .-> bedrock
+    clinical -. retrieves .-> faiss
+    clinical -. prompts .-> bedrock
+    drug -. retrieves .-> fda
+    drug -. prompts .-> bedrock
+    research -. retrieves .-> pubmed
+    research -. prompts .-> bedrock
+    summary -. synthesises with .-> bedrock
+
+    style START fill:#3b3b3b,stroke:#999,color:#fff
+    style END fill:#3b3b3b,stroke:#999,color:#fff
+    style stt_prep fill:#065f46,stroke:#10b981,color:#fff
+    style intake fill:#065f46,stroke:#10b981,color:#fff
+    style supervisor fill:#4338ca,stroke:#818cf8,color:#fff
+    style clinical fill:#1d4ed8,stroke:#60a5fa,color:#fff
+    style drug fill:#1d4ed8,stroke:#60a5fa,color:#fff
+    style research fill:#1d4ed8,stroke:#60a5fa,color:#fff
+    style summary fill:#1d4ed8,stroke:#60a5fa,color:#fff
+    style output fill:#9a3412,stroke:#fb923c,color:#fff
+    style TOOLS fill:#1f2937,stroke:#6b7280,color:#fff
