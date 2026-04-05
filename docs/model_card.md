@@ -52,11 +52,11 @@ LangGraph entry sequence:
 
 `clinical_node` 3-tier inline fallback (runs on every consultation):
 
-| Tier | Trigger                      | LLM used                            |
-| ---- | ---------------------------- | ----------------------------------- |
-| 1    | FAISS lexical overlap ≥ 0.08 | Claude Haiku + FAISS RAG context    |
-| 2    | RAG miss                     | Med42 via HuggingFace Inference API |
-| 3    | RAG miss + Med42 unavailable | Claude Haiku, no RAG context        |
+| Tier | Trigger                      | LLM used                            | Agent description                                                                                                    |
+| ---- | ---------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| 1    | FAISS lexical overlap ≥ 0.08 | Claude Haiku + FAISS RAG context    | **Clinical (Tier 1)** — context-grounded agent; retrieves relevant guidelines from FAISS and grounds Claude Haiku inference on local clinical evidence |
+| 2    | RAG miss                     | Med42 via HuggingFace Inference API | **Clinical (Tier 2)** — medical LLM fallback; queries Med42 (Llama 3 clinical fine-tune) directly when local RAG context is insufficient             |
+| 3    | RAG miss + Med42 unavailable | Claude Haiku, no RAG context        | **Clinical (Tier 3)** — last-resort agent; Claude Haiku with no knowledge-base context; fires only when both Tier 1 and Tier 2 are unavailable        |
 
 Each `clinical_findings` entry carries a `[Source: ...]` tag recording which tier fired. The shared helpers `_rag_miss_signal` and `_is_med42_error` are defined in Cell 6b alongside the Med42 utilities.
 

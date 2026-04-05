@@ -246,11 +246,11 @@ IMDA Governance pipeline (after summary):
 
 `clinical_node` runs an inline 3-tier fallback chain on every invocation:
 
-| Tier | Condition                  | LLM used                                         |
-| ---- | -------------------------- | ------------------------------------------------ |
-| 1    | FAISS RAG overlap ≥ 0.08   | Claude Haiku + FAISS context                     |
-| 2    | RAG miss → Med42 reachable | Med42 (HuggingFace `m42-health/Llama3-Med42-8B`) |
-| 3    | RAG miss + Med42 error     | Claude Haiku, no RAG context (last resort)       |
+| Tier | Condition                  | LLM used                                         | Agent description                                                                                                    |
+| ---- | -------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| 1    | FAISS RAG overlap ≥ 0.08   | Claude Haiku + FAISS context                     | **Clinical (Tier 1)** — context-grounded agent; retrieves relevant guidelines from FAISS and grounds Claude Haiku inference on local clinical evidence |
+| 2    | RAG miss → Med42 reachable | Med42 (HuggingFace `m42-health/Llama3-Med42-8B`) | **Clinical (Tier 2)** — medical LLM fallback; queries Med42 (Llama 3 clinical fine-tune) directly when local RAG context is insufficient             |
+| 3    | RAG miss + Med42 error     | Claude Haiku, no RAG context (last resort)       | **Clinical (Tier 3)** — last-resort agent; Claude Haiku with no knowledge-base context; fires only when both Tier 1 and Tier 2 are unavailable        |
 
 Each `clinical_findings` entry carries a `[Source: ...]` tag identifying which tier fired.
 
@@ -266,13 +266,13 @@ Optional STT smoke mode (Cell 10b):
 
 Each governance node adds fields to `AuraState`:
 
-| Node                         | Principle          | Adds to state                                                      |
-| ---------------------------- | ------------------ | ------------------------------------------------------------------ |
-| `xai_node`                   | P2 Explainability  | `xai_record`, confidence score, evidence sources                   |
-| `fairness_node`              | P3 Fairness        | `fairness_passed`, `fairness_issues`, `pdpa_compliant`             |
-| `human_oversight_node`       | P1 Human oversight | `oversight_level`, `oversight_instructions`                        |
-| `clinical_safety_guard_node` | MOH/HSA            | `output_blocked`, `moh_compliant`, MOH disclaimer                  |
-| `audit_node`                 | P5 Accountability  | `audit_log_path`, `ai_verify_runtime`, immutable JSONL audit trail |
+| Node                         | Principle          | Calls LLM? | Adds to state                                                      |
+| ---------------------------- | ------------------ | ---------- | ------------------------------------------------------------------ |
+| `xai_node`                   | P2 Explainability  | No         | `xai_record`, confidence score, evidence sources                   |
+| `fairness_node`              | P3 Fairness        | No         | `fairness_passed`, `fairness_issues`, `pdpa_compliant`             |
+| `human_oversight_node`       | P1 Human oversight | No         | `oversight_level`, `oversight_instructions`                        |
+| `clinical_safety_guard_node` | MOH/HSA            | No         | `output_blocked`, `moh_compliant`, MOH disclaimer                  |
+| `audit_node`                 | P5 Accountability  | No         | `audit_log_path`, `ai_verify_runtime`, immutable JSONL audit trail |
 
 After a consultation run, the export cell writes four artifacts to `aura_outputs/`:
 
