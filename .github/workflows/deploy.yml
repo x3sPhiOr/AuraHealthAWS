@@ -4,6 +4,12 @@ on:
   # Called directly from llmsecops.yml after the security-gate job passes.
   # This fires as soon as Gates 1-5 clear, without waiting for Gate 6 (promptfoo).
   workflow_call:
+    inputs:
+      html_changed:
+        description: "Whether prod_client.html or test_client.html changed in the triggering revision"
+        required: false
+        type: string
+        default: "auto"
 
   # Allow a manual re-deploy (e.g. config-only change, rollback) without
   # re-running all CI gates.
@@ -25,6 +31,7 @@ env:
   ECR_REPOSITORY: ah/aurahealthaws
   APP_RUNNER_SERVICE_NAME: aurahealthaws
   APP_RUNNER_SERVICE_ARN: ${{ vars.APP_RUNNER_SERVICE_ARN || '' }}
+  S3_BUCKET: aurahealth
 
 # ──────────────────────────────────────────────────────────────────────────────
 jobs:
@@ -42,6 +49,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 2
 
       # ── Resolve region and image tag ─────────────────────────────────────────
       - name: Resolve deploy variables
@@ -61,6 +69,30 @@ jobs:
           echo "image_tag=$TAG"   >> $GITHUB_OUTPUT
           echo "Resolved region  : $REGION"
           echo "Resolved image tag: $TAG"
+
+      - name: Detect static HTML changes
+        id: html_changes
+        shell: bash
+        env:
+          HTML_CHANGED_INPUT: ${{ inputs.html_changed }}
+        run: |
+          CHANGED="$HTML_CHANGED_INPUT"
+
+          if [ "$CHANGED" = "true" ] || [ "$CHANGED" = "false" ]; then
+            echo "Using caller-provided html_changed=$CHANGED"
+          elif git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+            if git diff --name-only HEAD^ HEAD | grep -Eq '^(prod_client\.html|test_client\.html)$'; then
+              CHANGED=true
+            else
+              CHANGED=false
+            fi
+          else
+            CHANGED=true
+            echo "No previous commit available; defaulting to upload."
+          fi
+
+          echo "changed=$CHANGED" >> $GITHUB_OUTPUT
+          echo "Static HTML upload needed: $CHANGED"
 
       # ── Authenticate to AWS ───────────────────────────────────────────────────
       # Use dedicated deploy credentials (separate from any local/dev keys):
@@ -122,6 +154,34 @@ jobs:
           echo "Pushed :$IMAGE_TAG"
           echo "Pushed :latest"
 
+      # ── Upload static HTML clients to S3 only when those files changed ─────
+      - name: Upload static clients to S3
+        if: steps.html_changes.outputs.changed == 'true'
+        env:
+          REGION: ${{ steps.vars.outputs.region }}
+          S3_BUCKET: ${{ env.S3_BUCKET }}
+        run: |
+          if [ -z "$S3_BUCKET" ]; then
+            echo "::error::S3 bucket is not configured. Set repository variable S3_BUCKET."
+            exit 1
+          fi
+
+          aws s3 cp prod_client.html "s3://$S3_BUCKET/prod_client.html" \
+            --region "$REGION" \
+            --content-type "text/html" \
+            --cache-control "no-cache"
+
+          aws s3 cp test_client.html "s3://$S3_BUCKET/test_client.html" \
+            --region "$REGION" \
+            --content-type "text/html" \
+            --cache-control "no-cache"
+
+          echo "Uploaded prod_client.html and test_client.html to s3://$S3_BUCKET/"
+
+      - name: Skip static HTML upload
+        if: steps.html_changes.outputs.changed != 'true'
+        run: echo "No changes detected in prod_client.html or test_client.html — skipping S3 upload."
+
       # ── Trigger App Runner deployment explicitly ──────────────────────────────
       # AutoDeploymentsEnabled=true in the service config already watches :latest,
       # but start-deployment provides immediate feedback and a deployment ID to track.
@@ -174,6 +234,8 @@ jobs:
           IMAGE_URI: ${{ steps.push.outputs.image_uri }}
           IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
           REGION: ${{ steps.vars.outputs.region }}
+          S3_BUCKET: ${{ env.S3_BUCKET }}
+          HTML_UPLOAD_NEEDED: ${{ steps.html_changes.outputs.changed }}
         run: |
           echo "## Deploy Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -183,6 +245,8 @@ jobs:
           echo "| Image tag (SHA) | \`$IMAGE_TAG\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Region | \`$REGION\` |" >> $GITHUB_STEP_SUMMARY
           echo "| ECR repository | \`${{ env.ECR_REPOSITORY }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| S3 bucket | \`$S3_BUCKET\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| HTML upload needed | \`$HTML_UPLOAD_NEEDED\` |" >> $GITHUB_STEP_SUMMARY
           echo "| App Runner service | \`${{ env.APP_RUNNER_SERVICE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Triggered by | \`${{ github.event_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
