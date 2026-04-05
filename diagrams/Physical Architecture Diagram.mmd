@@ -1,0 +1,71 @@
+graph TB
+    subgraph Internet["Internet"]
+        INT["Internet Users"]
+    end
+
+    subgraph AWSGlobalInfrastructure["AWS Global Infrastructure"]
+        subgraph USEast1Region["us-east-1 Region"]
+            subgraph AppRunnerManagedInfrastructure["AWS App Runner Managed Infrastructure"]
+                subgraph LoadBalancingLayer["Load Balancing Layer"]
+                    ALB["Application Load Balancer<br/>(Managed by AWS)"]
+                end
+
+                subgraph MultipleAvailabilityZones["Multiple Availability Zones"]
+                    subgraph AZ1A["AZ-1a"]
+                        C1["Container Instance 1<br/>AuraHealth App"]
+                    end
+
+                    subgraph AZ1B["AZ-1b"]
+                        C2["Container Instance 2<br/>AuraHealth App"]
+                    end
+
+                    subgraph AZ1C["AZ-1c"]
+                        C3["Container Instance N<br/>AuraHealth App"]
+                    end
+                end
+
+                subgraph AutoScalingController["Auto Scaling Controller"]
+                    ASC["AWS App Runner<br/>Auto Scaling Engine"]
+                end
+            end
+
+            subgraph MonitoringServices["Monitoring Services"]
+                CWL["CloudWatch Logs"]
+                CWM["CloudWatch Metrics"]
+                CWT["CloudWatch Alarms"]
+            end
+
+            subgraph SecurityNetworking["Security & Networking"]
+                WAF["AWS WAF<br/>(Optional)"]
+                CF["CloudFront<br/>(Optional)"]
+                SG["Security Groups<br/>(Managed)"]
+            end
+        end
+
+        subgraph SourceControl["Source Control"]
+            GH["GitHub Repository<br/>or ECR Registry"]
+        end
+    end
+
+    INT --> CF
+    CF --> WAF
+    WAF --> ALB
+    ALB --> C1
+    ALB --> C2
+    ALB --> C3
+
+    ASC --> C1
+    ASC --> C2
+    ASC --> C3
+
+    C1 --> CWL
+    C2 --> CWL
+    C3 --> CWL
+
+    C1 --> CWM
+    C2 --> CWM
+    C3 --> CWM
+
+    GH --> ALB
+
+    CWM --> CWT

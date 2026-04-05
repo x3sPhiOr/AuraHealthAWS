@@ -1,0 +1,55 @@
+graph TB
+    subgraph ExternalUsers["External Users"]
+        U["Users / Clients"]
+    end
+
+    subgraph S3Storage["S3 Buckets"]
+        FE_S3["Frontend S3 Bucket<br/>(Static Web Hosting)"]
+        ART_S3["Artifacts S3 Bucket<br/>(CloudFormation Logs & Aura Outputs)"]
+    end
+
+    subgraph AWSAppRunnerService["AWS App Runner Service"]
+        AR["AuraHealth App Runner Service<br/>waz6fna5ax.us-east-1.awsapprunner.com"]
+
+        subgraph ApplicationLayer["Application Layer"]
+            APP["Application Code"]
+            HC["Health Check Endpoint"]
+        end
+
+        subgraph AutoScaling["Auto Scaling"]
+            AS["Auto Scaling Engine"]
+            INST["Container Instances"]
+        end
+    end
+
+    subgraph SourceRepository["Source Repository"]
+        SRC["Source Code Repository<br/>(GitHub / ECR / etc.)"]
+    end
+
+    subgraph MonitoringLogging["Monitoring & Logging"]
+        CW["CloudWatch Logs"]
+        CWM["CloudWatch Metrics"]
+        XR["X-Ray Tracing"]
+    end
+
+    subgraph PotentialIntegrations["Potential Integrations"]
+        DB[("Database Services")]
+        API["External APIs"]
+        SES["Email Services"]
+    end
+
+    U --> FE_S3
+    FE_S3 -->|API calls| AR
+    U --> AR
+    SRC --> AR
+    AR --> APP
+    APP --> HC
+    AS --> INST
+    AR --> CW
+    AR --> CWM
+    AR --> XR
+    CW --> ART_S3
+    APP --> ART_S3
+    APP --> DB
+    APP --> API
+    APP --> SES

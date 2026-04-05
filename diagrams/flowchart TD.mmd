@@ -1,0 +1,81 @@
+flowchart TD
+    START([▶ User starts consultation]) --> FE
+
+    subgraph CHANNELS ["🌐 Frontend & API Layer"]
+        FE["Web / PHP / JS frontend"]
+        SCHEMA["GET /consult/schema<br/>Load form contract"]
+        TEXT_API["POST /consult<br/>Text transcript + patient context"]
+        AUDIO_API["POST /consult/audio<br/>Audio/WebM chunks"]
+        STT["OpenAI STT<br/>Transcribe + accumulate live caption"]
+        SSE["GET /stream/{session_id}<br/>Server-Sent Events updates"]
+    end
+
+    FE --> SCHEMA
+    FE --> TEXT_API
+    FE --> AUDIO_API
+    AUDIO_API --> STT
+    TEXT_API --> stt_prep
+    STT -->|final transcript| stt_prep
+
+    subgraph INPUT ["📥 Intake & Routing"]
+        stt_prep["stt_prep<br/>Normalise transcript<br/>Set source / STT flags"]
+        intake["intake<br/>Scrub PII with Presidio<br/>Capture detected entities"]
+        supervisor["supervisor<br/>Route via LLM JSON<br/>clinical / drug / research"]
+    end
+
+    stt_prep --> intake --> supervisor
+
+    supervisor -->|always| clinical
+    supervisor -->|if medications mentioned| drug
+    supervisor -->|if rare / unclear case| research
+
+    subgraph AGENTS ["🤖 Specialist Agents"]
+        clinical["clinical<br/>FAISS guideline retrieval<br/>Claude Haiku primary<br/>Med42 / Claude fallback on RAG miss"]
+        drug["drug<br/>FDA context + interaction review<br/>Medication safety checks"]
+        research["research<br/>PubMed / evidence synthesis<br/>Clinical research notes"]
+    end
+
+    clinical --> summary
+    drug --> summary
+    research --> summary
+
+    subgraph SYNTHESIS ["📝 Clinical Synthesis"]
+        summary["summary<br/>Combine agent findings<br/>Generate final SOAP note"]
+    end
+
+    subgraph GOVERNANCE ["🏛️ IMDA / MOH Governance Chain"]
+        xai["xai<br/>Explainability, provenance,<br/>confidence & evidence"]
+        fairness["fairness<br/>Bias / PDPA checks"]
+        human_oversight["human_oversight<br/>Advisory / mandatory review<br/>Escalation decision"]
+        clinical_safety["clinical_safety<br/>MOH / SaMD guardrails<br/>Block unsafe output if needed"]
+        audit["audit<br/>AI Verify runtime checks<br/>Immutable audit trail"]
+    end
+
+    summary --> xai --> fairness --> human_oversight --> clinical_safety --> audit --> END([⏹ Consultation complete])
+
+    subgraph OUTPUTS ["💾 Session Outputs"]
+        session_state["Live session state<br/>SOAP + findings + governance flags"]
+        jsonl["audit_logs/aura_audit.jsonl<br/>(append-only ledger)"]
+        sessionjson["audit_logs/{session_id}_audit.json<br/>(per-session governance record)"]
+        exports["aura_outputs/<br/>record.json / scrubbed_transcript.txt<br/>soap.txt / governance.txt"]
+    end
+
+    STT -.live caption updates.-> SSE
+    summary -.SOAP + findings.-> session_state
+    audit -.governance status.-> session_state
+    session_state -.stream back to UI.-> SSE
+    SSE --> FE
+
+    audit -.writes.-> jsonl
+    audit -.writes.-> sessionjson
+    summary -.export step.-> exports
+    xai -.metadata.-> exports
+    fairness -.checks.-> exports
+    human_oversight -.decision.-> exports
+
+    style CHANNELS fill:#e0f2fe,stroke:#0284c7
+    style INPUT fill:#dcfce7,stroke:#22c55e
+    style AGENTS fill:#dbeafe,stroke:#3b82f6
+    style SYNTHESIS fill:#ede9fe,stroke:#8b5cf6
+    style GOVERNANCE fill:#fef3c7,stroke:#f59e0b
+    style OUTPUTS fill:#fee2e2,stroke:#ef4444
