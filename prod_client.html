@@ -111,8 +111,8 @@
 
     /* ── Section labels ── */
     .section-label {
-      font-size: 20px;
-      font-weight: bold;
+      font-size: 11px;
+      font-weight: 600;
       letter-spacing: .08em;
       text-transform: uppercase;
       color: var(--muted);
@@ -166,8 +166,6 @@
     .btn-danger:hover { background: #fecaca; }
     .btn-green   { background: #dcfce7; color: var(--green); border: 1px solid #86efac; }
     .btn-green:hover { background: #bbf7d0; }
-    .btn-blue   { background: #90d5ff; color: var(--green); border: 1px solid #217ab2;; }
-    .btn-blue:hover { background: #90d5ff; }
 
     .btn-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 
@@ -355,8 +353,8 @@
 <header>
   <h1>🩺 Aura Health</h1>
   <input id="baseUrl" type="text" value="https://waz6fna5ax.us-east-1.awsapprunner.com" style="display:none;" />
-  <label style="margin-left:20px;">API Key <span style="color:var(--red);">*</span></label>
-  <input id="apiKey" type="password" value="" placeholder="Enter your API key..." style="width:180px;" />
+  <label style="margin-left:20px;">Token <span style="color:var(--red);">*</span></label>
+  <input id="apiKey" type="password" value="" placeholder="Input token for connection" style="width:250px;" />
   <span id="sessionBadge" style="display:none;">No active session</span>
   <span id="healthBadge" style="margin-left:auto;">● Checking…</span>
 </header>
@@ -372,7 +370,7 @@
         <label>Patient MRN</label>
         <input id="pc-mrn" type="text" placeholder="e.g. MRN-001" onkeydown="if(event.key==='Enter')lookupMRN()" />
       </div>
-      <button class="btn btn-blue" onclick="lookupMRN()">Search</button>
+      <button class="btn btn-outline" onclick="lookupMRN()" style="padding:6px 12px; font-size:12px; flex-shrink:0;">Search</button>
     </div>
     <div id="mrn-status" style="padding: 0 16px 8px; font-size: 11px; min-height: 16px;"></div>
     <div class="patient-form">
@@ -428,7 +426,7 @@ Patient: I have had persistent chest tightness and shortness of breath on exerti
 
       <div class="btn-row">
         <button class="btn btn-primary" id="submitTextBtn" onclick="submitText()">
-          Submit 
+          POST /consult → stream
         </button>
         <button class="btn btn-outline" onclick="clearLog()">Clear log</button>
       </div>
@@ -708,6 +706,10 @@ async function consumeStream(sseIterable) {
   let finalState = null;
   for await (const data of sseIterable) {
     logEvent(data);
+    if (data.startsWith('[STT] accumulated_transcript:')) {
+      document.getElementById('captionBox').textContent =
+        data.slice('[STT] accumulated_transcript:'.length).trimStart();
+    }
     if (data.startsWith('[SUMMARY] soap_note:')) {
       renderSoap(data.slice('[SUMMARY] soap_note:'.length).trimStart());
     }
@@ -744,6 +746,12 @@ async function checkHealth() {
 
 async function loadSchema() {
   const out = document.getElementById('schemaOut');
+  if (!getApiKey()) {
+    out.style.display = 'block';
+    out.textContent = 'Error: API key is required. Enter your key in the header.';
+    logInfo('Error: API key is required.');
+    return;
+  }
   try {
     const r = await fetch(base() + '/consult/schema', {
       headers: getAuthHeaders(),
@@ -772,6 +780,7 @@ async function submitText() {
   const btn        = document.getElementById('submitTextBtn');
   const transcript = document.getElementById('transcript').value.trim();
   if (!transcript) { logInfo('Transcript is empty.'); return; }
+  if (!getApiKey()) { logInfo('Error: API key is required. Enter your key in the header.'); return; }
 
   clearLog();
   const sessionId = genId();
@@ -799,28 +808,35 @@ async function submitText() {
     const payload = await res.json();
     logInfo('Queued — opening stream: ' + payload.stream_url);
 
-    // 2. Open SSE stream (GET — standard EventSource works here)
-    await new Promise((resolve) => {
-      const es = new EventSource(base() + payload.stream_url);
-      es.onmessage = (e) => {
-        logEvent(e.data);
-        if (e.data.startsWith('[SUMMARY] soap_note:')) {
-          renderSoap(e.data.slice('[SUMMARY] soap_note:'.length).trimStart());
-        }
-        if (e.data === '[DONE]' || e.data.startsWith('[ERROR]')) {
-          es.close();
-          resolve();
-          // 3. Fetch final state for governance badges
-          fetch(base() + '/session/' + sessionId, {
-            headers: getAuthHeaders(),
-          })
-            .then(r => r.json())
-            .then(j => renderGovernance(j.final_state))
-            .catch(() => {});
-        }
-      };
-      es.onerror = () => { logInfo('Stream connection error.'); es.close(); resolve(); };
-    });
+    // 2. Open SSE stream (using fetch-based reader to support Authorization header + query param fallback for CloudFront)
+    try {
+      const authHeaders = getAuthHeaders();
+      const apiKey = getApiKey();
+      logInfo('DEBUG: Auth headers: ' + JSON.stringify(authHeaders));
+      let streamUrl = base() + payload.stream_url;
+      if (apiKey) {
+        streamUrl += (streamUrl.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(apiKey);
+      }
+      logInfo('DEBUG: Stream URL: ' + streamUrl);
+      const streamRes = await fetch(streamUrl, {
+        headers: authHeaders,
+      });
+      if (!streamRes.ok) {
+        const errText = await streamRes.text();
+        logInfo('Stream error ' + streamRes.status + ': ' + errText);
+        return;
+      }
+      await consumeStream(readSSE(streamRes));
+      // 3. Fetch final state for governance badges
+      fetch(base() + '/session/' + sessionId, {
+        headers: getAuthHeaders(),
+      })
+        .then(r => r.json())
+        .then(j => renderGovernance(j.final_state))
+        .catch(() => {});
+    } catch (e) {
+      logInfo('Stream connection error: ' + e.message);
+    }
 
   } finally {
     btn.disabled = false;
@@ -872,21 +888,29 @@ function _startRecorderCycle() {
     logInfo((isFinal ? 'Final' : 'Chunk ' + idx) + ' — ' + (blob.size / 1024).toFixed(1) + ' KB → transcribing…');
 
     if (!isFinal) {
+      // Start the next cycle immediately (before awaiting upload) so there is
+      // no gap between chunks. The existing audioStream stays alive; the new
+      // MediaRecorder instance begins capturing while this blob is uploading.
+      // If stop was already requested we skip starting a new cycle and handle
+      // the final-chunk path below after the upload completes.
+      const newCycleStarted = !stopRequested;
+      if (newCycleStarted) _startRecorderCycle();
+
       await sendAudioChunk(blob, idx, false);
-      if (stopRequested) {
-        // stopRecording() was called while this chunk was uploading; the
-        // recorder was already inactive so mediaRecorder.stop() was a no-op.
-        // Manually trigger the final path with an empty blob (all audio is
-        // already uploaded) so the backend receives is_final=true.
+
+      if (!newCycleStarted && stopRequested) {
+        // Stop was requested before the new cycle could start — no other
+        // onstop will run, so send the final signal and clean up here.
         await sendFinalAudioChunk(new Blob([], { type: audioMimeType || 'audio/webm' }), chunkIndex++);
         clearInterval(timerInterval);
         audioStream.getTracks().forEach(t => t.stop());
         document.getElementById('recDot').classList.remove('recording');
         document.getElementById('startRecBtn').disabled = false;
         document.getElementById('stopRecBtn').disabled  = true;
-      } else {
-        _startRecorderCycle();          // immediately begin next 10-second window
       }
+      // If newCycleStarted and stop was pressed during the upload,
+      // stopRecording() already stopped the new recorder; its own onstop
+      // will fire with isFinal=true and handle the final chunk + cleanup.
     } else {
       await sendFinalAudioChunk(blob, idx);
       clearInterval(timerInterval);
@@ -906,6 +930,10 @@ function _startRecorderCycle() {
 async function startRecording() {
   if (!navigator.mediaDevices?.getUserMedia) {
     logInfo('getUserMedia not supported in this browser.');
+    return;
+  }
+  if (!getApiKey()) {
+    logInfo('Error: API key is required. Enter your key in the header.');
     return;
   }
   clearLog();
