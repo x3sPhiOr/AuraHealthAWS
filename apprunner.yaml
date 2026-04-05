@@ -60,7 +60,17 @@ run:
     - name: HF_MEDICAL_MODEL
       value: m42-health/Llama3-Med42-8B
 
-    # Output directories — map to EFS mount points for persistence.
+    # Persist consultation exports and audit logs to S3.
+    - name: ENABLE_S3_ARTIFACT_UPLOADS
+      value: "true"
+    - name: AURA_OUTPUTS_BUCKET
+      value: aurahealth-aura-outputs
+    - name: AURA_AUDIT_BUCKET
+      value: aurahealth-audit-logs
+    - name: AURA_S3_PREFIX
+      value: sessions
+
+    # Output directories — local fallback paths inside the container.
     - name: OPENFDA_ZIP_DIR
       value: data/fda_zip_drop
 

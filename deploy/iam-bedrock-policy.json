@@ -22,6 +22,22 @@
         "bedrock:GetFoundationModel"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "AuraArtifactUpload",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:AbortMultipartUpload",
+        "s3:ListBucket",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": [
+        "arn:aws:s3:::aurahealth-aura-outputs",
+        "arn:aws:s3:::aurahealth-aura-outputs/*",
+        "arn:aws:s3:::aurahealth-audit-logs",
+        "arn:aws:s3:::aurahealth-audit-logs/*"
+      ]
     }
   ]
 }
