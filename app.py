@@ -1236,7 +1236,7 @@ print("  Governance: summary → xai → fairness → human_oversight → clinic
 # FASTAPI SERVER  (cell 49)
 # ══════════════════════════════════════════════════════════════════════════════
 
-api = FastAPI(title="Aura Health API", version="1.0.0")
+api = FastAPI(title="Aura Health 2.0 API", version="1.0.0")
 api.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
